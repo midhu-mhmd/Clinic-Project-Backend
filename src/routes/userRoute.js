@@ -1,6 +1,7 @@
 import express from "express";
 import {
-  register,
+  sendRegisterOTP,   // 👈 Changed from 'register'
+  verifyRegisterOTP, // 👈 New Controller
   login,
   getProfile,
   googleLogin,
@@ -11,15 +12,22 @@ import { auth } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
-// PUBLIC ROUTES
+// --- PUBLIC ROUTES ---
 
-router.post("/register", register);
+// Step 1: Frontend calls this to send email
+router.post("/send-otp", sendRegisterOTP); 
+
+// Step 2: Frontend calls this to verify code & create user
+router.post("/verify-otp", verifyRegisterOTP); 
+
 router.post("/login", login);
 router.post("/google", googleLogin);
+
+// Forgot Password Flow
 router.post("/forgot-password", requestOTP);
 router.post("/reset-password-otp", resetPasswordWithOTP);
 
-// PROTECTED ROUTES
+// --- PROTECTED ROUTES ---
 
 router.get("/me", auth, getProfile);
 

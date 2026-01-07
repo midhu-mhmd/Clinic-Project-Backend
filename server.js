@@ -7,6 +7,8 @@ import cors from "cors";
 import helmet from "helmet";
 import connectDB from "./src/config/db.js";
 import router from "./src/routes/userRoute.js";
+import tenantRoute from "./src/routes/tenantRoute.js";
+import paymentRoute from "./src/routes/paymentRoute.js";
 
 const app = express();
 app.use(
@@ -25,22 +27,10 @@ app.use(express.json());
 
 connectDB();
 
-app.get("/test-email", async (req, res) => {
-  try {
-    const info = await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: "your_email@gmail.com",
-      subject: "Test Email",
-      text: "This is a test email",
-    });
-    res.send("Email sent: " + info.messageId);
-  } catch (err) {
-    console.log(err);
-    res.status(500).send(err.message);
-  }
-});
 
 app.use("/api/users", router);
+app.use("/api/tenants", tenantRoute);
+app.use("/api/payments", paymentRoute);
 
 const PORT = process.env.PORT || 5000;
 
