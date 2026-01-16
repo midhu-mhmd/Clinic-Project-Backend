@@ -27,22 +27,54 @@ const tenantSchema = new mongoose.Schema(
       type: String,
       required: [true, "Address is required"],
     },
+    // --- BRANDING FIELDS (For GSAP Clinic List) ---
+    image: {
+      type: String,
+      default: "https://images.unsplash.com/photo-1629909613654-2871b886daa4?q=80&w=800",
+    },
+    tags: {
+      type: [String],
+      default: ["General Practice", "Medical Excellence"],
+    },
+    description: {
+      type: String,
+      maxlength: [500, "Description cannot exceed 500 characters"],
+    },
+    // --- SETTINGS ---
     settings: {
       themeColor: { type: String, default: "#8DAA9D" },
       isPublic: { type: Boolean, default: true },
     },
+    // --- BILLING & STATUS ---
     subscription: {
-      plan: { type: String, enum: ["FREE", "PRO", "ENTERPRISE"], default: "FREE" },
-      status: { type: String, enum: ["ACTIVE", "PAST_DUE", "CANCELED"], default: "ACTIVE" },
+      plan: { 
+        type: String, 
+        enum: ["FREE", "PRO", "ENTERPRISE", "Professional"], // Added Professional to match your frontend
+        default: "FREE" 
+      },
+      status: { 
+        type: String, 
+        enum: ["ACTIVE", "PAST_DUE", "CANCELED", "PENDING_VERIFICATION"], 
+        default: "ACTIVE" 
+      },
+      razorpayOrderId: String,
+      razorpayPaymentId: String,
     },
   },
   { timestamps: true }
 );
 
-// ✅ Synchronous pre-validate hook (no next)
+// ✅ Synchronous pre-validate hook for Slug Generation
 tenantSchema.pre("validate", function () {
   if (this.name && !this.slug) {
-    this.slug = this.name.toLowerCase().split(" ").join("-") + "-" + Date.now();
+    // Generates: "city-dental-clinic-1704712345678"
+    this.slug = this.name
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\s-]/g, "") // Remove special characters
+      .replace(/\s+/g, "-")     // Replace spaces with -
+      .concat("-")
+      .concat(Date.now());
   }
 });
 
