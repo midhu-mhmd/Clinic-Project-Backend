@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import path from "path";
 dotenv.config();
 
 import express from "express";
@@ -9,6 +10,7 @@ import connectDB from "./src/config/db.js";
 import router from "./src/routes/userRoute.js";
 import tenantRoute from "./src/routes/tenantRoute.js";
 import paymentRoute from "./src/routes/paymentRoute.js";
+import doctorRouter from "./src/routes/doctorRoute.js";
 
 const app = express();
 
@@ -31,11 +33,13 @@ app.use(
 );
 
 app.use(express.json()); // Parses incoming JSON requests
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 // 3. ROUTES
 app.use("/api/users", router);
 app.use("/api/tenants", tenantRoute);
 app.use("/api/payments", paymentRoute);
+app.use("/api/doctors", doctorRouter);
 
 // 4. CATCH 404 (For non-existent routes)
 app.use((req, res, next) => {

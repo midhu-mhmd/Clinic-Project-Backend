@@ -1,168 +1,216 @@
 import * as tenantService from "../services/tenantService.js";
-import jwt from "jsonwebtoken";
 import Tenant from "../models/tenantModel.js";
+import User from "../models/userModel.js";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+
+// ==========================================
+// UTILITIES & MIDDLEWARE HELPERS
+// ==========================================
 
 /**
- * @desc    Register a new Clinic and Owner (Triggers OTP via Service)
+ * Higher-order function to eliminate try-catch blocks.
+ * Passes all async errors to the global error middleware.
  */
-export const createTenant = async (req, res, next) => {
-  try {
-    const { owner, clinic } = req.body;
-    console.log("--- 🚀 STARTING REGISTRATION ---");
-    
-    const { user, tenant } = await tenantService.registerClinicTransaction(owner, clinic);
-
-    // Initial token (User is still isVerified: false)
-    const token = jwt.sign(
-      { id: user._id, tenantId: tenant._id, role: user.role, isVerified: user.isVerified },
-      process.env.JWT_SECRET,
-      { expiresIn: "1d" }
-    );
-
-    return res.status(201).json({
-      success: true,
-      message: "Registration successful. OTP sent to email.",
-      token,
-      user: { id: user._id, email: user.email, isVerified: user.isVerified }
-    });
-  } catch (error) {
-    console.error("❌ REGISTRATION ERROR:", error.message);
-    return res.status(400).json({ success: false, message: error.message });
-  }
+const catchAsync = (fn) => (req, res, next) => {
+  fn(req, res, next).catch(next);
 };
+
+const generateToken = (payload, expiry = "1d") => {
+  if (!process.env.JWT_SECRET) throw new Error("Internal Configuration Error: JWT_SECRET missing");
+  
+  return jwt.sign(
+    {
+      id: String(payload.id),
+      tenantId: payload.tenantId ? String(payload.tenantId) : null,
+      role: payload.role,
+      isVerified: payload.isVerified,
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: expiry }
+  );
+};
+
+// ==========================================
+// PUBLIC DIRECTORY & CLINIC DATA
+// ==========================================
 
 /**
- * @desc    Verify OTP and Activate Account
- * @route   POST /api/tenants/verify-otp
+ * @desc Get all public clinics with optimized formatting
  */
-export const verifyEmailOTP = async (req, res, next) => {
-  try {
-    const { email, otp } = req.body;
+export const getDirectory = catchAsync(async (req, res) => {
+  const clinics = await tenantService.getAllPublicClinics();
 
-    if (!email || !otp) {
-      return res.status(400).json({ success: false, message: "Email and OTP are required" });
-    }
+  const formattedClinics = (clinics || []).map((clinic, index) => ({
+    _id: clinic._id,
+    indexId: String(index + 1).padStart(2, "0"),
+    name: clinic.name || "Premier Health Clinic",
+    location: clinic.address || "Regional Access",
+    tags: Array.isArray(clinic.tags) && clinic.tags.length > 0 ? clinic.tags : ["General Practice"],
+    img: clinic.image || "https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?q=80&w=800",
+    tier: clinic.subscription?.plan || "STANDARD"
+  }));
 
-    const user = await tenantService.verifyUserEmail(email, otp);
-
-    // --- CRITICAL FIX FOR REDIRECT ---
-    // Generate a NEW token now that the user IS verified
-    // This allows the frontend to access protected routes (like plans/dashboard)
-    const token = jwt.sign(
-      { id: user._id, tenantId: user.tenantId, role: user.role, isVerified: true },
-      process.env.JWT_SECRET,
-      { expiresIn: "1d" }
-    );
-
-    res.status(200).json({
-      success: true,
-      message: "Email verified successfully.",
-      token, // Send the new token back
-      user: { 
-        id: user._id, 
-        email: user.email, 
-        tenantId: user.tenantId, 
-        isVerified: true 
-      }
-    });
-  } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
-  }
-};
+  res.status(200).json({ success: true, data: formattedClinics });
+});
 
 /**
- * @desc    Resend Verification OTP
- * @route   POST /api/tenants/resend-otp
+ * @desc Public view of practitioners within a specific clinic
  */
-export const resendOTP = async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ success: false, message: "Email is required" });
-
-    await tenantService.resendOTP(email);
-    
-    res.status(200).json({ 
-      success: true, 
-      message: "A new verification code has been sent to your email." 
-    });
-  } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
-  }
-};
+export const getClinicDoctorsPublic = catchAsync(async (req, res) => {
+  const { clinicId } = req.params;
+  const doctors = await tenantService.getPublicDoctorsService(clinicId);
+  res.status(200).json({ success: true, data: doctors });
+});
 
 /**
- * @desc    Get all public clinics for the directory
+ * @desc Public clinic details by ID
  */
-export const getDirectory = async (req, res, next) => {
-  try {
-    const clinics = await tenantService.getAllPublicClinics();
+export const getClinicById = catchAsync(async (req, res) => {
+  const clinic = await Tenant.findById(req.params.id).lean();
+  if (!clinic) return res.status(404).json({ success: false, message: "Clinic record not found." });
+  res.status(200).json({ success: true, data: clinic });
+});
 
-    const formattedClinics = clinics.map((clinic, index) => ({
-      _id: clinic._id,
-      id: String(index + 1).padStart(2, "0"),
-      name: clinic.name,
-      location: clinic.address,
-      tags: clinic.tags?.length > 0 ? clinic.tags : ["General Practice"],
-      img: clinic.image,
-      slug: clinic.slug,
-      plan: clinic.subscription?.plan
-    }));
+// ==========================================
+// AUTHENTICATION FLOW
+// ==========================================
 
-    res.status(200).json(formattedClinics);
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Failed to load directory" });
+export const createTenant = catchAsync(async (req, res) => {
+  const { owner, clinic } = req.body;
+  const { user, tenant } = await tenantService.registerClinicTransaction(owner, clinic);
+
+  const token = generateToken({
+    id: user._id,
+    tenantId: tenant._id,
+    role: user.role,
+    isVerified: user.isVerified
+  });
+
+  res.status(201).json({
+    success: true,
+    message: "Registration initiated. Verification code dispatched.",
+    data: { token, user: { id: user._id, email: user.email, isVerified: user.isVerified } }
+  });
+});
+
+export const loginTenant = catchAsync(async (req, res) => {
+  const { email, password } = req.body;
+  const user = await User.findOne({ email: email.toLowerCase().trim() }).select("+password").lean();
+
+  if (!user || !(await bcrypt.compare(password, user.password))) {
+    return res.status(401).json({ success: false, message: "Invalid email or password." });
   }
-};
+
+  const token = generateToken({ 
+    id: user._id, 
+    tenantId: user.tenantId, 
+    role: user.role, 
+    isVerified: user.isVerified 
+  });
+
+  res.status(200).json({ 
+    success: true, 
+    data: { 
+      token, 
+      user: { id: user._id, email: user.email, role: user.role, tenantId: user.tenantId } 
+    } 
+  });
+});
+
+export const verifyEmailOTP = catchAsync(async (req, res) => {
+  const { email, otp } = req.body;
+  const result = await tenantService.verifyUserEmail(email, otp);
+  res.status(200).json({ success: true, message: "Account successfully verified.", data: result });
+});
+
+export const resendOTP = catchAsync(async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ success: false, message: "Email is required." });
+  
+  await tenantService.resendOTP(email);
+  res.status(200).json({ success: true, message: "New security code dispatched." });
+});
+
+// ==========================================
+// PROTECTED CLINIC MANAGEMENT
+// ==========================================
+
+export const getMyDashboard = catchAsync(async (req, res) => {
+  // Use id from auth middleware
+  const tenant = await tenantService.getTenantByOwnerId(req.user.id);
+  if (!tenant) return res.status(404).json({ success: false, message: "Clinic association not found." });
+  res.status(200).json({ success: true, data: tenant });
+});
+
+export const updateProfile = catchAsync(async (req, res) => {
+  const updated = await tenantService.updateTenantSettings(req.user.tenantId, req.body);
+  res.status(200).json({ success: true, message: "Profile updated successfully.", data: updated });
+});
+
+// ==========================================
+// PRACTITIONER (DOCTOR) MANAGEMENT
+// ==========================================
 
 /**
- * @desc    Get a single clinic by ID
+ * @desc Get all doctors for the logged-in admin's clinic
  */
-export const getClinicById = async (req, res, next) => {
-  try {
-    const clinic = await Tenant.findById(req.params.id);
-
-    if (!clinic) {
-      return res.status(404).json({ success: false, message: "Facility not found." });
-    }
-
-    res.status(200).json({
-      _id: clinic._id,
-      name: clinic.name,
-      location: clinic.address,
-      img: clinic.image,
-      tags: clinic.tags?.length > 0 ? clinic.tags : ["Verified Facility"],
-      description: clinic.description || "Medical facility focused on clinical excellence.",
-      owner: clinic.ownerId
-    });
-  } catch (error) {
-    if (error.kind === "ObjectId") {
-      return res.status(400).json({ success: false, message: "Invalid ID format." });
-    }
-    res.status(500).json({ success: false, message: error.message });
+export const getMyDoctors = catchAsync(async (req, res) => {
+  if (!req.user.tenantId) {
+    return res.status(403).json({ success: false, message: "Administrative context missing." });
   }
-};
 
-/**
- * @desc    Get dashboard data
- */
-export const getMyDashboard = async (req, res, next) => {
-  try {
-    const tenant = await tenantService.getTenantByOwnerId(req.user.id);
-    if (!tenant) return res.status(404).json({ success: false, message: "Clinic not found" });
-    res.status(200).json({ success: true, data: tenant });
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Error fetching dashboard" });
-  }
-};
+  const doctors = await tenantService.getDoctorsByTenantService(req.user.tenantId);
+  res.status(200).json({ 
+    success: true, 
+    count: doctors.length, 
+    data: doctors 
+  });
+});
 
-/**
- * @desc    Update Profile
- */
-export const updateProfile = async (req, res, next) => {
-  try {
-    const updatedTenant = await tenantService.updateTenantSettings(req.user.tenantId, req.body);
-    res.status(200).json({ success: true, message: "Updated successfully", data: updatedTenant });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
+export const addDoctor = catchAsync(async (req, res) => {
+  const doctor = await tenantService.createDoctorService(req.body, req.user.tenantId);
+  res.status(201).json({ 
+    success: true, 
+    message: "Practitioner record initialized.", 
+    data: doctor 
+  });
+});
+
+export const updateDoctor = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const doctor = await tenantService.updateDoctorService(id, req.user.tenantId, req.body);
+  res.status(200).json({ 
+    success: true, 
+    message: "Practitioner record synchronized.", 
+    data: doctor 
+  });
+});
+
+export const deleteDoctor = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  await tenantService.softDeleteDoctorService(id, req.user.tenantId);
+  res.status(200).json({ success: true, message: "Practitioner record archived." });
+});
+
+// ==========================================
+// PASSWORD RECOVERY
+// ==========================================
+
+export const forgotPasswordClinic = catchAsync(async (req, res) => {
+  await tenantService.sendPasswordResetOTP(req.body.email);
+  res.status(200).json({ success: true, message: "Reset code dispatched to email." });
+});
+
+export const resetPasswordClinic = catchAsync(async (req, res) => {
+  const { email, otp, newPassword } = req.body;
+  await tenantService.verifyUserEmail(email, otp); 
+  
+  const hashedPassword = await bcrypt.hash(newPassword, 12);
+  await User.findOneAndUpdate(
+    { email: email.toLowerCase().trim() }, 
+    { $set: { password: hashedPassword } }
+  );
+  
+  res.status(200).json({ success: true, message: "Password updated successfully." });
+});

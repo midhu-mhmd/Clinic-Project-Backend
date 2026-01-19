@@ -8,7 +8,7 @@ import {
   requestOTP,
   resetPasswordWithOTP,
 } from "./../controllers/userController.js";
-import { auth } from "../middlewares/authMiddleware.js";
+import { protect  } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
@@ -29,6 +29,6 @@ router.post("/reset-password-otp", resetPasswordWithOTP);
 
 // --- PROTECTED ROUTES ---
 
-router.get("/me", auth, getProfile);
+router.get("/me", protect, getProfile);
 
 export default router;
