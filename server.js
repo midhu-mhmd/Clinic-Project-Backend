@@ -18,9 +18,10 @@ const app = express();
 connectDB();
 
 // 2. GLOBAL MIDDLEWARE
+// 2. GLOBAL MIDDLEWARE
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: "http://localhost:5173", // Verified your Vite port
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
   })
@@ -29,6 +30,13 @@ app.use(
 app.use(
   helmet({
     crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+    crossOriginResourcePolicy: { policy: "cross-origin" }, // Allows images from Cloudinary to load
+    contentSecurityPolicy: {
+      directives: {
+        "default-src": ["'self'"],
+        "img-src": ["'self'", "data:", "https://res.cloudinary.com"], // Essential for Cloudinary images
+      },
+    },
   })
 );
 

@@ -6,7 +6,97 @@ import {
 } from "../utils/cloudinaryUpload.js";
 
 /**
- * CREATE doctor
+ * @desc    GET all doctors across ALL clinics (Global Directory)
+ * @access  Public (Patient Side)
+ */
+export const getPublicDoctorDirectory = async (req, res) => {
+  try {
+    const doctors = await doctorService.getAllDoctorsPublic();
+
+    res.status(200).json({
+      success: true,
+      count: doctors.length,
+      data: doctors,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch directory",
+    });
+  }
+};
+
+/**
+ * @desc    GET single doctor by ID (Public or Tenant Isolated)
+ * @access  Public/Private
+ */
+export const getDoctorById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Check if user is logged in as Admin (tenant isolation) or Patient (Public)
+    const tenantId = req.user?.tenantId;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid Practitioner ID format" 
+      });
+    }
+
+    let doctor;
+    if (tenantId) {
+      // Admin View: Must belong to their clinic
+      doctor = await doctorService.getDoctorById(tenantId, id);
+    } else {
+      // Patient/Public View: Fetch by ID regardless of clinic
+      doctor = await doctorService.getDoctorByIdPublic(id);
+    }
+
+    if (!doctor || doctor.isDeleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Practitioner profile not found or has been archived.",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: doctor,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to retrieve practitioner profile",
+    });
+  }
+};
+
+/**
+ * @desc    GET all doctors for a SPECIFIC tenant
+ * @access  Private (Admin Side)
+ */
+export const getAllDoctors = async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId;
+    const doctors = await doctorService.getDoctors(tenantId);
+
+    res.status(200).json({
+      success: true,
+      count: doctors.length,
+      data: doctors,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch practitioners",
+    });
+  }
+};
+
+/**
+ * @desc    CREATE doctor
+ * @access  Private (Admin Only)
  */
 export const createDoctor = async (req, res) => {
   try {
@@ -41,28 +131,8 @@ export const createDoctor = async (req, res) => {
 };
 
 /**
- * GET all doctors (tenant isolated)
- */
-export const getAllDoctors = async (req, res) => {
-  try {
-    const tenantId = req.user.tenantId;
-    const doctors = await doctorService.getDoctors(tenantId);
-
-    res.status(200).json({
-      success: true,
-      count: doctors.length,
-      data: doctors,
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message || "Failed to fetch practitioners",
-    });
-  }
-};
-
-/**
- * UPDATE doctor
+ * @desc    UPDATE doctor
+ * @access  Private (Admin Only)
  */
 export const updateDoctor = async (req, res) => {
   try {
@@ -75,27 +145,22 @@ export const updateDoctor = async (req, res) => {
 
     let updateData = { ...req.body };
 
-    // 1. If a new file is present, handle image replacement
     if (req.file) {
-      // Fetch specifically this doctor to check for old image
       const doctor = await doctorService.getDoctorById(tenantId, id);
       
       if (!doctor) {
         return res.status(404).json({ success: false, message: "Practitioner not found" });
       }
 
-      // Delete old image from Cloudinary if it exists
       if (doctor.imagePublicId) {
         await deleteFromCloudinary(doctor.imagePublicId);
       }
 
-      // Upload new image
       const uploaded = await uploadToCloudinary(req.file.buffer, "doctors");
       updateData.image = uploaded.url;
       updateData.imagePublicId = uploaded.publicId;
     }
 
-    // 2. Update the record
     const updatedDoctor = await doctorService.updateDoctor(tenantId, id, updateData);
 
     if (!updatedDoctor) {
@@ -119,7 +184,8 @@ export const updateDoctor = async (req, res) => {
 };
 
 /**
- * SOFT DELETE doctor
+ * @desc    SOFT DELETE doctor
+ * @access  Private (Admin Only)
  */
 export const deleteDoctor = async (req, res) => {
   try {
@@ -130,14 +196,12 @@ export const deleteDoctor = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid ID" });
     }
 
-    // Fetch specifically this doctor
     const doctor = await doctorService.getDoctorById(tenantId, id);
 
     if (!doctor) {
       return res.status(404).json({ success: false, message: "Practitioner not found" });
     }
 
-    // Cleanup Cloudinary image
     if (doctor.imagePublicId) {
       await deleteFromCloudinary(doctor.imagePublicId);
     }

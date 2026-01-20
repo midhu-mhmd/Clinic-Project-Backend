@@ -1,5 +1,6 @@
 import express from "express";
 const router = express.Router();
+import upload from "../middlewares/uploadMiddleware.js"; 
 
 import { 
   createTenant, 
@@ -8,11 +9,13 @@ import {
   loginTenant,
   forgotPasswordClinic,
   resetPasswordClinic,
+  changePassword,
   getDirectory, 
   getClinicById,
-  getStats,      // Added for Dashboard Cards
-  getProfile,    // Added for Header/Sidebar
+  getStats,
+  getProfile,
   updateProfile,
+  uploadImage, 
   getClinicDoctorsPublic
 } from "../controllers/tenantController.js";
 
@@ -27,6 +30,7 @@ router.post("/verify-otp", verifyEmailOTP);
 router.post("/resend-otp", resendOTP);
 router.post("/forgot-password", forgotPasswordClinic);
 router.post("/reset-password", resetPasswordClinic);
+router.put("/change-password", changePassword);
 
 // ==========================================
 // PUBLIC DIRECTORY DATA
@@ -38,12 +42,23 @@ router.get("/doctors/public/:clinicId", getClinicDoctorsPublic);
 // PROTECTED CLINIC ADMIN ROUTES
 // ==========================================
 
-/** * NOTE: We place specific paths like /stats and /profile ABOVE the /:id route 
- * to prevent Express from treating "stats" as an ":id" (CastError prevention).
- */
+// Dashbord Statistics
 router.get("/stats", protect, authorize("CLINIC_ADMIN"), getStats);
+
+// Profile Management
 router.get("/profile", protect, authorize("CLINIC_ADMIN"), getProfile);
 router.put("/update", protect, authorize("CLINIC_ADMIN"), updateProfile);
+
+/** * @route POST /api/tenants/upload-image
+ * Uses Multer memoryStorage to catch the file, then streams to Cloudinary
+ */
+router.post(
+  "/upload-image", 
+  protect, 
+  authorize("CLINIC_ADMIN"), 
+  upload.single("image"), // 'image' key must match your Frontend FormData key
+  uploadImage
+);
 
 // ==========================================
 // DYNAMIC ROUTES (Always Last)

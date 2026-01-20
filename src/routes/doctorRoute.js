@@ -2,8 +2,10 @@ import express from "express";
 import {
   createDoctor,
   getAllDoctors,
+  getDoctorById,
   updateDoctor,
   deleteDoctor,
+  getPublicDoctorDirectory, // Import the new global directory controller
 } from "../controllers/doctorController.js";
 import { protect } from "../middlewares/authMiddleware.js";
 import upload from "../middlewares/uploadMiddleware.js";
@@ -11,22 +13,37 @@ import upload from "../middlewares/uploadMiddleware.js";
 const doctorRouter = express.Router();
 
 /**
- * 🔐 Protect all doctor routes
- * - Extracts req.user from JWT
- * - Provides req.user.tenantId for multi-tenancy
+ * --- PUBLIC ROUTES ---
+ * Accessible by anyone (Patients)
+ * These must be defined BEFORE doctorRouter.use(protect)
+ */
+
+// GET all doctors from all clinics
+doctorRouter.get("/directory", getPublicDoctorDirectory);
+
+// GET single doctor details (Public version)
+doctorRouter.get("/public/:id", getDoctorById);
+
+
+/**
+ * --- PROTECTED ROUTES ---
+ * Requires a valid token (Clinic Admins)
  */
 doctorRouter.use(protect);
 
 /**
  * @route   GET /api/doctors
- * @desc    Get all doctors for logged-in tenant
+ * @desc    Get doctors belonging ONLY to the logged-in admin's clinic
  */
 doctorRouter.get("/", getAllDoctors);
 
 /**
+ * @route   GET /api/doctors/:id
+ */
+doctorRouter.get("/:id", getDoctorById);
+
+/**
  * @route   POST /api/doctors
- * @desc    Create doctor (Cloudinary image optional)
- * @note    FormData key MUST be "image"
  */
 doctorRouter.post(
   "/",
@@ -36,7 +53,6 @@ doctorRouter.post(
 
 /**
  * @route   PUT /api/doctors/:id
- * @desc    Update doctor details + replace image
  */
 doctorRouter.put(
   "/:id",
@@ -46,7 +62,6 @@ doctorRouter.put(
 
 /**
  * @route   DELETE /api/doctors/:id
- * @desc    Soft delete doctor (archive)
  */
 doctorRouter.delete("/:id", deleteDoctor);
 

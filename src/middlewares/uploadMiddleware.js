@@ -1,7 +1,7 @@
 import multer from "multer";
 
 const upload = multer({
-  storage: multer.memoryStorage(), // 🔥 Cloudinary-friendly
+  storage: multer.memoryStorage(),
   limits: {
     fileSize: 2 * 1024 * 1024, // 2MB
   },
@@ -20,5 +20,4 @@ const upload = multer({
     }
   },
 });
-
 export default upload;

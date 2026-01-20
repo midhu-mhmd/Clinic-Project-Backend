@@ -14,7 +14,6 @@ class DoctorService {
       tenantId,
       image: imageUrl,
       imagePublicId,
-      // Ensure experience is a number, default to 0
       experience: Number(doctorData.experience) || 0,
     });
 
@@ -22,18 +21,36 @@ class DoctorService {
   }
 
   /**
-   * GET ALL doctors for tenant
+   * NEW: GET ALL doctors across ALL clinics (Public/Patient view)
+   */
+  async getAllDoctorsPublic() {
+    // We remove the tenantId filter here to fetch every doctor in the database
+    // only filtering out those that are soft-deleted.
+    return await Doctor.find({ isDeleted: { $ne: true } })
+      .populate("tenantId", "name") // Optional: brings in the clinic name
+      .sort({ createdAt: -1 });
+  }
+
+  /**
+   * GET ALL doctors for a specific tenant (Admin view)
    */
   async getDoctors(tenantId) {
-    // Only fetch doctors that aren't soft-deleted
     return await Doctor.find({ tenantId, isDeleted: { $ne: true } }).sort({ createdAt: -1 });
   }
 
   /**
-   * GET SINGLE doctor (For internal controller checks like finding old images)
+   * GET SINGLE doctor
    */
   async getDoctorById(tenantId, doctorId) {
     return await Doctor.findOne({ _id: doctorId, tenantId });
+  }
+
+  /**
+   * NEW: GET SINGLE doctor by ID only (Public/Patient view)
+   * Required for the patient to see details without needing the admin's tenantId
+   */
+  async getDoctorByIdPublic(doctorId) {
+    return await Doctor.findOne({ _id: doctorId, isDeleted: { $ne: true } });
   }
 
   /**
@@ -42,21 +59,18 @@ class DoctorService {
   async updateDoctor(tenantId, doctorId, updateData) {
     const dataToUpdate = { ...updateData };
 
-    // 1. Sanitize experience to prevent string conversion issues
     if (dataToUpdate.experience !== undefined) {
       dataToUpdate.experience = Number(dataToUpdate.experience) || 0;
     }
 
-    // 2. Security: Never allow tenantId or ID to be changed via updateData
     delete dataToUpdate.tenantId;
     delete dataToUpdate._id;
 
-    // 3. Perform Update
     const updatedDoctor = await Doctor.findOneAndUpdate(
       { _id: doctorId, tenantId },
       { $set: dataToUpdate },
       {
-        new: true, // Return the modified document
+        new: true, 
         runValidators: true,
       }
     );

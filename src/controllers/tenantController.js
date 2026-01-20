@@ -3,6 +3,14 @@ import Tenant from "../models/tenantModel.js";
 import User from "../models/userModel.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { v2 as cloudinary } from 'cloudinary';
+
+// Configure Cloudinary (Ensure these are in your .env)
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 // ==========================================
 // UTILITIES & MIDDLEWARE HELPERS
@@ -31,9 +39,6 @@ const generateToken = (payload, expiry = "1d") => {
 // PUBLIC DIRECTORY & CLINIC DATA
 // ==========================================
 
-/**
- * @desc Get all public clinics with optimized formatting
- */
 export const getDirectory = catchAsync(async (req, res) => {
   const clinics = await tenantService.getAllPublicClinics();
 
@@ -50,18 +55,12 @@ export const getDirectory = catchAsync(async (req, res) => {
   res.status(200).json({ success: true, data: formattedClinics });
 });
 
-/**
- * @desc Public view of practitioners within a specific clinic
- */
 export const getClinicDoctorsPublic = catchAsync(async (req, res) => {
   const { clinicId } = req.params;
   const doctors = await tenantService.getPublicDoctorsService(clinicId);
   res.status(200).json({ success: true, data: doctors });
 });
 
-/**
- * @desc Public clinic details by ID
- */
 export const getClinicById = catchAsync(async (req, res) => {
   const clinic = await Tenant.findById(req.params.id).lean();
   if (!clinic) return res.status(404).json({ success: false, message: "Clinic record not found." });
@@ -107,10 +106,7 @@ export const loginTenant = catchAsync(async (req, res) => {
 
   res.status(200).json({ 
     success: true, 
-    data: { 
-      token, 
-      user: { id: user._id, email: user.email, role: user.role, tenantId: user.tenantId } 
-    } 
+    data: { token, user: { id: user._id, email: user.email, role: user.role, tenantId: user.tenantId } } 
   });
 });
 
@@ -123,35 +119,62 @@ export const verifyEmailOTP = catchAsync(async (req, res) => {
 export const resendOTP = catchAsync(async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ success: false, message: "Email is required." });
-  
   await tenantService.resendOTP(email);
   res.status(200).json({ success: true, message: "New security code dispatched." });
 });
 
 // ==========================================
-// PROTECTED CLINIC MANAGEMENT (DASHBOARD)
+// PROTECTED CLINIC MANAGEMENT
 // ==========================================
 
-/**
- * @desc Get Dashboard Statistics (Patients, Doctors, Wait Time)
- */
 export const getStats = catchAsync(async (req, res) => {
   const stats = await tenantService.getClinicStats(req.user.tenantId);
   res.status(200).json({ success: true, data: stats });
 });
 
-/**
- * @desc Get Logged-in Clinic Profile
- */
 export const getProfile = catchAsync(async (req, res) => {
-  const tenant = await Tenant.findById(req.user.tenantId).lean();
-  if (!tenant) return res.status(404).json({ success: false, message: "Clinic association not found." });
+  const tenant = await tenantService.getTenantProfile(req.user.tenantId);
   res.status(200).json({ success: true, data: tenant });
 });
 
 export const updateProfile = catchAsync(async (req, res) => {
   const updated = await tenantService.updateTenantSettings(req.user.tenantId, req.body);
-  res.status(200).json({ success: true, message: "Profile updated successfully.", data: updated });
+  res.status(200).json({ success: true, message: "Profile synchronized.", data: updated });
+});
+
+/**
+ * @desc Logic to handle Memory Buffer -> Cloudinary -> MongoDB
+ */
+export const uploadImage = catchAsync(async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ success: false, message: "No image file provided." });
+  }
+
+  // Upload the Buffer from Memory Storage to Cloudinary
+  const uploadToCloudinary = () => {
+    return new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        { folder: "clinic_logos" },
+        (error, result) => {
+          if (result) resolve(result);
+          else reject(error);
+        }
+      );
+      stream.end(req.file.buffer);
+    });
+  };
+
+  const cloudinaryResult = await uploadToCloudinary();
+  const imageUrl = cloudinaryResult.secure_url;
+
+  // Sync to database
+  const updated = await tenantService.updateTenantImageService(req.user.tenantId, imageUrl);
+
+  res.status(200).json({ 
+    success: true, 
+    message: "Clinic logo updated.", 
+    imageUrl: updated.image 
+  });
 });
 
 // ==========================================
@@ -159,7 +182,6 @@ export const updateProfile = catchAsync(async (req, res) => {
 // ==========================================
 
 export const forgotPasswordClinic = catchAsync(async (req, res) => {
-  // Logic inside tenantService to send OTP for password reset
   await tenantService.resendOTP(req.body.email); 
   res.status(200).json({ success: true, message: "Reset code dispatched to email." });
 });
@@ -175,4 +197,39 @@ export const resetPasswordClinic = catchAsync(async (req, res) => {
   );
   
   res.status(200).json({ success: true, message: "Password updated successfully." });
+});
+export const changePassword = catchAsync(async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  const user = await User.findById(req.user.id).select("+password");
+
+  const isMatch = await bcrypt.compare(currentPassword, user.password);
+  if (!isMatch) {
+    return res.status(401).json({ success: false, message: "Current password incorrect." });
+  }
+
+  user.password = await bcrypt.hash(newPassword, 12);
+  await user.save();
+
+  res.status(200).json({ success: true, message: "Password updated successfully." });
+});
+
+export const getSecuritySettings = catchAsync(async (req, res) => {
+  const user = await User.findById(req.user.id);
+  
+  // Dynamic session data (Mocked based on current request)
+  const sessions = [{
+    browser: req.headers['user-agent'].split(' ')[0],
+    os: "Identified System",
+    ipAddress: req.ip || "127.0.0.1",
+    lastAccess: "Active Now",
+    isCurrent: true
+  }];
+
+  res.status(200).json({ 
+    success: true, 
+    data: { 
+      twoFactor: user.twoFactorEnabled || false,
+      sessions 
+    } 
+  });
 });
