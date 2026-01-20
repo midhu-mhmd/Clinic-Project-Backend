@@ -8,10 +8,6 @@ import jwt from "jsonwebtoken";
 // UTILITIES & MIDDLEWARE HELPERS
 // ==========================================
 
-/**
- * Higher-order function to eliminate try-catch blocks.
- * Passes all async errors to the global error middleware.
- */
 const catchAsync = (fn) => (req, res, next) => {
   fn(req, res, next).catch(next);
 };
@@ -133,12 +129,22 @@ export const resendOTP = catchAsync(async (req, res) => {
 });
 
 // ==========================================
-// PROTECTED CLINIC MANAGEMENT
+// PROTECTED CLINIC MANAGEMENT (DASHBOARD)
 // ==========================================
 
-export const getMyDashboard = catchAsync(async (req, res) => {
-  // Use id from auth middleware
-  const tenant = await tenantService.getTenantByOwnerId(req.user.id);
+/**
+ * @desc Get Dashboard Statistics (Patients, Doctors, Wait Time)
+ */
+export const getStats = catchAsync(async (req, res) => {
+  const stats = await tenantService.getClinicStats(req.user.tenantId);
+  res.status(200).json({ success: true, data: stats });
+});
+
+/**
+ * @desc Get Logged-in Clinic Profile
+ */
+export const getProfile = catchAsync(async (req, res) => {
+  const tenant = await Tenant.findById(req.user.tenantId).lean();
   if (!tenant) return res.status(404).json({ success: false, message: "Clinic association not found." });
   res.status(200).json({ success: true, data: tenant });
 });
@@ -149,56 +155,12 @@ export const updateProfile = catchAsync(async (req, res) => {
 });
 
 // ==========================================
-// PRACTITIONER (DOCTOR) MANAGEMENT
-// ==========================================
-
-/**
- * @desc Get all doctors for the logged-in admin's clinic
- */
-export const getMyDoctors = catchAsync(async (req, res) => {
-  if (!req.user.tenantId) {
-    return res.status(403).json({ success: false, message: "Administrative context missing." });
-  }
-
-  const doctors = await tenantService.getDoctorsByTenantService(req.user.tenantId);
-  res.status(200).json({ 
-    success: true, 
-    count: doctors.length, 
-    data: doctors 
-  });
-});
-
-export const addDoctor = catchAsync(async (req, res) => {
-  const doctor = await tenantService.createDoctorService(req.body, req.user.tenantId);
-  res.status(201).json({ 
-    success: true, 
-    message: "Practitioner record initialized.", 
-    data: doctor 
-  });
-});
-
-export const updateDoctor = catchAsync(async (req, res) => {
-  const { id } = req.params;
-  const doctor = await tenantService.updateDoctorService(id, req.user.tenantId, req.body);
-  res.status(200).json({ 
-    success: true, 
-    message: "Practitioner record synchronized.", 
-    data: doctor 
-  });
-});
-
-export const deleteDoctor = catchAsync(async (req, res) => {
-  const { id } = req.params;
-  await tenantService.softDeleteDoctorService(id, req.user.tenantId);
-  res.status(200).json({ success: true, message: "Practitioner record archived." });
-});
-
-// ==========================================
 // PASSWORD RECOVERY
 // ==========================================
 
 export const forgotPasswordClinic = catchAsync(async (req, res) => {
-  await tenantService.sendPasswordResetOTP(req.body.email);
+  // Logic inside tenantService to send OTP for password reset
+  await tenantService.resendOTP(req.body.email); 
   res.status(200).json({ success: true, message: "Reset code dispatched to email." });
 });
 

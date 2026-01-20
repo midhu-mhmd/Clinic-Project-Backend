@@ -22,12 +22,12 @@ const tenantSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
+      index: true, // Optimized for dashboard lookups
     },
     address: {
       type: String,
       required: [true, "Address is required"],
     },
-    // --- BRANDING FIELDS (For GSAP Clinic List) ---
     image: {
       type: String,
       default: "https://images.unsplash.com/photo-1629909613654-2871b886daa4?q=80&w=800",
@@ -40,16 +40,14 @@ const tenantSchema = new mongoose.Schema(
       type: String,
       maxlength: [500, "Description cannot exceed 500 characters"],
     },
-    // --- SETTINGS ---
     settings: {
       themeColor: { type: String, default: "#8DAA9D" },
       isPublic: { type: Boolean, default: true },
     },
-    // --- BILLING & STATUS ---
     subscription: {
       plan: { 
         type: String, 
-        enum: ["FREE", "PRO", "ENTERPRISE", "Professional"], // Added Professional to match your frontend
+        enum: ["FREE", "PRO", "ENTERPRISE", "Professional"], 
         default: "FREE" 
       },
       status: { 
@@ -61,18 +59,27 @@ const tenantSchema = new mongoose.Schema(
       razorpayPaymentId: String,
     },
   },
-  { timestamps: true }
+  { 
+    timestamps: true,
+    toJSON: { virtuals: true }, // Ensure virtuals are sent to frontend
+    toObject: { virtuals: true }
+  }
 );
 
-// ✅ Synchronous pre-validate hook for Slug Generation
+// ✅ Virtual for Frontend Compatibility
+// This allows frontend to use tenant.subscriptionPlan instead of tenant.subscription.plan
+tenantSchema.virtual("subscriptionPlan").get(function () {
+  return this.subscription?.plan;
+});
+
+// ✅ Slug Generation logic remains the same
 tenantSchema.pre("validate", function () {
   if (this.name && !this.slug) {
-    // Generates: "city-dental-clinic-1704712345678"
     this.slug = this.name
       .toLowerCase()
       .trim()
-      .replace(/[^\w\s-]/g, "") // Remove special characters
-      .replace(/\s+/g, "-")     // Replace spaces with -
+      .replace(/[^\w\s-]/g, "")
+      .replace(/\s+/g, "-")
       .concat("-")
       .concat(Date.now());
   }

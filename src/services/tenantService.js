@@ -16,7 +16,6 @@ const redisClient = createClient({
 
 redisClient.on("error", (err) => console.error("❌ Redis Client Error:", err));
 
-// Auto-reconnect logic for production stability
 const connectRedis = async () => {
   try {
     if (!redisClient.isOpen) await redisClient.connect();
@@ -45,7 +44,7 @@ const transporter = nodemailer.createTransport({
 // ==========================================
 
 /**
- * @desc Step 1: Register Clinic & Owner with Mongoose Session (Atomic Transaction)
+ * @desc Atomic Transaction to register Clinic and its Admin Owner
  */
 export const registerClinicTransaction = async (ownerData, clinicData) => {
   const session = await mongoose.startSession();
@@ -54,15 +53,13 @@ export const registerClinicTransaction = async (ownerData, clinicData) => {
   try {
     const emailLower = ownerData.email.toLowerCase().trim();
     
-    // 1. Check existing user within session
     const existingUser = await User.findOne({ email: emailLower }).session(session);
-    if (existingUser) throw new Error("This email is already registered to a medical faculty.");
+    if (existingUser) throw new Error("This email is already registered.");
 
-    // 2. Hash & Prepare OTP
     const hashedPassword = await bcrypt.hash(ownerData.password, 12);
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // 3. Create User
+    // 1. Create User
     const [user] = await User.create([{
       ...ownerData,
       email: emailLower,
@@ -71,7 +68,7 @@ export const registerClinicTransaction = async (ownerData, clinicData) => {
       isVerified: false,
     }], { session });
 
-    // 4. Create Tenant
+    // 2. Create Tenant
     const [tenant] = await Tenant.create([{
       ...clinicData,
       ownerId: user._id,
@@ -79,22 +76,22 @@ export const registerClinicTransaction = async (ownerData, clinicData) => {
       subscription: { plan: "FREE", status: "ACTIVE" },
     }], { session });
 
-    // 5. Link Tenant to User
+    // 3. Link back
     user.tenantId = tenant._id;
     await user.save({ session });
 
-    // 6. Redis & Email (Side effects handled after DB success)
+    // 4. Verification Setup
     await redisClient.setEx(`otp:${emailLower}`, 600, otp);
 
     await transporter.sendMail({
       from: `"Medicare Systems" <${process.env.EMAIL_USER}>`,
       to: emailLower,
       subject: "Action Required: Verify Clinic Enrollment",
-      html: `<div style="font-family:sans-serif;">
-               <h2>Welcome to the Network</h2>
-               <p>Your institutional verification code is:</p>
-               <h1 style="color:#10b981; letter-spacing:5px;">${otp}</h1>
-               <p>This code expires in 10 minutes.</p>
+      html: `<div style="font-family:sans-serif; color: #333; text-align: center; border: 1px solid #eee; padding: 20px;">
+                <h2 style="color: #8DAA9D;">Welcome to Sovereign</h2>
+                <p>Your institutional verification code is:</p>
+                <h1 style="letter-spacing: 10px; font-size: 32px; color: #1a1a1a;">${otp}</h1>
+                <p style="color: #666;">This code expires in 10 minutes.</p>
              </div>`,
     });
 
@@ -110,7 +107,7 @@ export const registerClinicTransaction = async (ownerData, clinicData) => {
 };
 
 /**
- * @desc High-Performance Token Generation
+ * @desc Verify OTP and update status
  */
 export const verifyUserEmail = async (email, otp) => {
   const emailLower = email.toLowerCase().trim();
@@ -120,7 +117,6 @@ export const verifyUserEmail = async (email, otp) => {
   const storedOtp = await redisClient.get(`otp:${emailLower}`);
   if (!storedOtp || storedOtp !== String(otp)) throw new Error("Invalid or expired security code.");
 
-  // Atomic update for verification status
   if (!user.isVerified) {
     await User.updateOne({ _id: user._id }, { $set: { isVerified: true } });
   }
@@ -136,75 +132,86 @@ export const verifyUserEmail = async (email, otp) => {
   return { token, user };
 };
 
-// ==========================================
-// DOCTOR SERVICES (Optimized Queries)
-// ==========================================
+/**
+ * @desc Re-trigger OTP dispatch
+ */
+export const resendOTP = async (email) => {
+  const emailLower = email.toLowerCase().trim();
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  
+  await redisClient.setEx(`otp:${emailLower}`, 600, otp);
 
-export const createDoctorService = async (doctorData, tenantId) => {
-  if (!tenantId) throw new Error("Institutional Context (Tenant ID) is missing.");
-
-  return await Doctor.create({
-    ...doctorData,
-    email: doctorData.email.toLowerCase().trim(),
-    experience: Number(doctorData.experience) || 0,
-    tenantId,
-    isActive: true,
-    isDeleted: false
+  await transporter.sendMail({
+    from: `"Medicare Systems" <${process.env.EMAIL_USER}>`,
+    to: emailLower,
+    subject: "New Verification Code",
+    html: `<p>Your code is: <b>${otp}</b></p>`,
   });
 };
 
-export const updateDoctorService = async (doctorId, tenantId, updateData) => {
-  const doctor = await Doctor.findOneAndUpdate(
-    { _id: doctorId, tenantId },
+// ==========================================
+// DASHBOARD & ANALYTICS HELPERS
+// ==========================================
+
+/**
+ * @desc Aggregated stats for the Clinic Dashboard
+ */
+export const getClinicStats = async (tenantId) => {
+  const [totalDoctors, patientResult] = await Promise.all([
+    Doctor.countDocuments({ tenantId, isDeleted: { $ne: true } }),
+    Doctor.aggregate([
+      { $match: { tenantId: new mongoose.Types.ObjectId(tenantId), isDeleted: { $ne: true } } },
+      { $group: { _id: null, total: { $sum: "$patientsCount" } } }
+    ])
+  ]);
+
+  return {
+    totalDoctors,
+    totalPatients: patientResult[0]?.total || 0,
+    todayAppointments: 0, // Logic to be added once Appointment model is ready
+    waitTime: 15
+  };
+};
+
+// ==========================================
+// TENANT & DIRECTORY SERVICES
+// ==========================================
+
+/**
+ * @desc Fetch all clinics visible to patients
+ */
+export const getAllPublicClinics = async () => {
+  return await Tenant.find({ "settings.isPublic": true }).select('-__v').lean();
+};
+
+/**
+ * @desc Fetch clinic by owner (for initial login routing)
+ */
+export const getTenantByOwnerId = async (ownerId) => {
+  return await Tenant.findOne({ ownerId }).lean();
+};
+
+/**
+ * @desc Core profile updates
+ */
+export const updateTenantSettings = async (tenantId, updateData) => {
+  return await Tenant.findByIdAndUpdate(
+    tenantId,
     { $set: updateData },
     { new: true, runValidators: true, lean: true }
   );
-
-  if (!doctor) throw new Error("Record not found or access denied.");
-  return doctor;
 };
 
-export const softDeleteDoctorService = async (doctorId, tenantId) => {
-  const doctor = await Doctor.findOneAndUpdate(
-    { _id: doctorId, tenantId },
-    { 
-      $set: { 
-        isDeleted: true, 
-        deletedAt: new Date(),
-        isActive: false 
-      } 
-    },
-    { new: true, lean: true }
-  );
-
-  if (!doctor) throw new Error("Practitioner record not found or access denied.");
-  return doctor;
-};
-
-export const getDoctorsByTenantService = async (tenantId) => {
-  // Use .lean() for 5x faster read performance on JSON-only data
-  return await Doctor.find({ tenantId, isDeleted: { $ne: true } })
-    .sort("-createdAt")
-    .lean();
-};
-
+/**
+ * @desc Public doctor list for a specific clinic (Used in Patient-facing directory)
+ */
 export const getPublicDoctorsService = async (tenantId) => {
   return await Doctor.find({ 
     tenantId, 
     isActive: true, 
     isDeleted: { $ne: true },
-    status: { $in: ["On Duty", "On Break"] } // Business logic refinement
+    status: { $in: ["On Duty", "On Break"] }
   })
   .select('name specialization education experience availability image rating status patientsCount')
   .lean(); 
-};
-
-
-
-export const getAllPublicClinics = async () => {
-  return await Tenant.find({ "settings.isPublic": true }).select('-__v').lean();
-};
-
-export const getTenantByOwnerId = async (ownerId) => {
-  return await Tenant.findOne({ ownerId }).lean();
 };

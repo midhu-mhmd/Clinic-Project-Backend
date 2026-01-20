@@ -10,18 +10,17 @@ import {
   resetPasswordClinic,
   getDirectory, 
   getClinicById,
-  getMyDashboard, 
+  getStats,      // Added for Dashboard Cards
+  getProfile,    // Added for Header/Sidebar
   updateProfile,
-  addDoctor,
-  updateDoctor,  // Added this
-  deleteDoctor,  // Added this
-  getMyDoctors,
   getClinicDoctorsPublic
 } from "../controllers/tenantController.js";
 
 import { protect, authorize } from "../middlewares/authMiddleware.js";
 
-// --- PUBLIC AUTH ---
+// ==========================================
+// PUBLIC AUTH ROUTES
+// ==========================================
 router.post("/register", createTenant);
 router.post("/login", loginTenant);
 router.post("/verify-otp", verifyEmailOTP);
@@ -29,22 +28,26 @@ router.post("/resend-otp", resendOTP);
 router.post("/forgot-password", forgotPasswordClinic);
 router.post("/reset-password", resetPasswordClinic);
 
-// --- PUBLIC DATA ---
+// ==========================================
+// PUBLIC DIRECTORY DATA
+// ==========================================
 router.get("/all", getDirectory); 
 router.get("/doctors/public/:clinicId", getClinicDoctorsPublic);
 
-// --- PROTECTED CLINIC ADMIN ROUTES ---
-router.get("/dashboard", protect, authorize("CLINIC_ADMIN"), getMyDashboard);
+// ==========================================
+// PROTECTED CLINIC ADMIN ROUTES
+// ==========================================
+
+/** * NOTE: We place specific paths like /stats and /profile ABOVE the /:id route 
+ * to prevent Express from treating "stats" as an ":id" (CastError prevention).
+ */
+router.get("/stats", protect, authorize("CLINIC_ADMIN"), getStats);
+router.get("/profile", protect, authorize("CLINIC_ADMIN"), getProfile);
 router.put("/update", protect, authorize("CLINIC_ADMIN"), updateProfile);
 
-// --- PRACTITIONER (DOCTOR) MANAGEMENT ---
-// These routes handle the CRUD for doctors within a specific clinic
-router.post("/doctors", protect, authorize("CLINIC_ADMIN"), addDoctor);
-router.get("/doctors", protect, authorize("CLINIC_ADMIN"), getMyDoctors);
-router.put("/doctors/:id", protect, authorize("CLINIC_ADMIN"), updateDoctor);    // For Edits
-router.delete("/doctors/:id", protect, authorize("CLINIC_ADMIN"), deleteDoctor); // For Soft Delete
-
-// --- DYNAMIC ROUTES (Always Last) ---
+// ==========================================
+// DYNAMIC ROUTES (Always Last)
+// ==========================================
 router.get("/:id", getClinicById);
 
 export default router;

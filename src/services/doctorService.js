@@ -1,75 +1,81 @@
 import Doctor from "../models/doctorModel.js";
 
 /**
- * Service to handle Business Logic for Medical Practitioners
- * Includes Multi-tenancy support and Soft Delete handling
+ * Service layer for Medical Practitioners
  */
 class DoctorService {
+
   /**
-   * CREATE: logic for adding a new doctor
+   * CREATE doctor
    */
-  async createDoctor(tenantId, doctorData, filePath) {
+  async createDoctor(tenantId, doctorData, imageUrl = "", imagePublicId = "") {
     const doctor = new Doctor({
       ...doctorData,
       tenantId,
-      image: filePath || "", // Save path provided by Multer
-      // Ensure experience is stored as a number (FormData sends strings)
+      image: imageUrl,
+      imagePublicId,
+      // Ensure experience is a number, default to 0
       experience: Number(doctorData.experience) || 0,
     });
+
     return await doctor.save();
   }
 
   /**
-   * GET ALL: Filtered by the active tenant
+   * GET ALL doctors for tenant
    */
   async getDoctors(tenantId) {
-    // Your 'pre-find' middleware in doctorModel handles isDeleted: false automatically
-    return await Doctor.find({ tenantId }).sort({ createdAt: -1 });
+    // Only fetch doctors that aren't soft-deleted
+    return await Doctor.find({ tenantId, isDeleted: { $ne: true } }).sort({ createdAt: -1 });
   }
 
   /**
-   * UPDATE: Logic for the "Edit" functionality
+   * GET SINGLE doctor (For internal controller checks like finding old images)
    */
-  async updateDoctor(tenantId, doctorId, updateData, filePath) {
+  async getDoctorById(tenantId, doctorId) {
+    return await Doctor.findOne({ _id: doctorId, tenantId });
+  }
+
+  /**
+   * UPDATE doctor
+   */
+  async updateDoctor(tenantId, doctorId, updateData) {
     const dataToUpdate = { ...updateData };
 
-    // 1. Data Sanitization
-    // Convert experience to Number to match Mongoose Schema requirements
+    // 1. Sanitize experience to prevent string conversion issues
     if (dataToUpdate.experience !== undefined) {
-      dataToUpdate.experience = Number(dataToUpdate.experience);
+      dataToUpdate.experience = Number(dataToUpdate.experience) || 0;
     }
 
-    // 2. Image Logic
-    // Only update the 'image' field if a NEW file was actually uploaded.
-    // This prevents overwriting the existing image URL with an empty string.
-    if (filePath) {
-      dataToUpdate.image = filePath;
-    } else {
-      // Remove 'image' from the update object if no new file is provided
-      delete dataToUpdate.image; 
-    }
+    // 2. Security: Never allow tenantId or ID to be changed via updateData
+    delete dataToUpdate.tenantId;
+    delete dataToUpdate._id;
 
-    // 3. Update Database
-    // Query includes tenantId to ensure strict data isolation between tenants
+    // 3. Perform Update
     const updatedDoctor = await Doctor.findOneAndUpdate(
       { _id: doctorId, tenantId },
       { $set: dataToUpdate },
-      { new: true, runValidators: true }
+      {
+        new: true, // Return the modified document
+        runValidators: true,
+      }
     );
 
     return updatedDoctor;
   }
 
   /**
-   * SOFT DELETE: Archives record instead of permanent removal
+   * SOFT DELETE doctor
    */
   async softDeleteDoctor(tenantId, doctorId) {
     return await Doctor.findOneAndUpdate(
       { _id: doctorId, tenantId },
-      { 
-        isDeleted: true, 
-        deletedAt: new Date(),
-        isActive: false 
+      {
+        $set: {
+          isDeleted: true,
+          deletedAt: new Date(),
+          isActive: false,
+        }
       },
       { new: true }
     );
