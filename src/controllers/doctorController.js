@@ -6,8 +6,39 @@ import {
 } from "../utils/cloudinaryUpload.js";
 
 /**
- * @desc    GET all doctors across ALL clinics (Global Directory)
- * @access  Public (Patient Side)
+ * FETCH BY CLINIC ID
+ * Used by the appointment booking flow to filter faculty by facility.
+ */
+export const getDoctorsByClinic = async (req, res) => {
+  try {
+    const { clinicId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(clinicId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid Facility ID format",
+      });
+    }
+
+    // This calls the service method that handles the 'tenantId' query
+    const doctors = await doctorService.getDoctorsByClinic(clinicId);
+
+    res.status(200).json({
+      success: true,
+      count: doctors.length,
+      data: doctors,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch specialists for this facility",
+    });
+  }
+};
+
+/**
+ * PUBLIC DIRECTORY
+ * Fetches all active doctors across all clinics.
  */
 export const getPublicDoctorDirectory = async (req, res) => {
   try {
@@ -27,29 +58,25 @@ export const getPublicDoctorDirectory = async (req, res) => {
 };
 
 /**
- * @desc    GET single doctor by ID (Public or Tenant Isolated)
- * @access  Public/Private
+ * GET SINGLE DOCTOR
+ * Handles both public view and authenticated tenant view.
  */
 export const getDoctorById = async (req, res) => {
   try {
     const { id } = req.params;
-    
-    // Check if user is logged in as Admin (tenant isolation) or Patient (Public)
     const tenantId = req.user?.tenantId;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid Practitioner ID format" 
+      return res.status(400).json({
+        success: false,
+        message: "Invalid Practitioner ID format",
       });
     }
 
     let doctor;
     if (tenantId) {
-      // Admin View: Must belong to their clinic
       doctor = await doctorService.getDoctorById(tenantId, id);
     } else {
-      // Patient/Public View: Fetch by ID regardless of clinic
       doctor = await doctorService.getDoctorByIdPublic(id);
     }
 
@@ -73,8 +100,8 @@ export const getDoctorById = async (req, res) => {
 };
 
 /**
- * @desc    GET all doctors for a SPECIFIC tenant
- * @access  Private (Admin Side)
+ * GET ALL (PRIVATE)
+ * Admin view for a specific tenant.
  */
 export const getAllDoctors = async (req, res) => {
   try {
@@ -95,8 +122,8 @@ export const getAllDoctors = async (req, res) => {
 };
 
 /**
- * @desc    CREATE doctor
- * @access  Private (Admin Only)
+ * CREATE DOCTOR
+ * Includes image upload to Cloudinary and uses the updated service.
  */
 export const createDoctor = async (req, res) => {
   try {
@@ -110,11 +137,12 @@ export const createDoctor = async (req, res) => {
       imagePublicId = uploaded.publicId;
     }
 
+    // doctorService now handles the numeric conversion for consultationFee
     const doctor = await doctorService.createDoctor(
       tenantId,
       req.body,
       imageUrl,
-      imagePublicId
+      imagePublicId,
     );
 
     res.status(201).json({
@@ -131,8 +159,8 @@ export const createDoctor = async (req, res) => {
 };
 
 /**
- * @desc    UPDATE doctor
- * @access  Private (Admin Only)
+ * UPDATE DOCTOR
+ * Handles data modification and image replacement.
  */
 export const updateDoctor = async (req, res) => {
   try {
@@ -140,16 +168,20 @@ export const updateDoctor = async (req, res) => {
     const tenantId = req.user.tenantId;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: "Invalid Practitioner ID" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid Practitioner ID" });
     }
 
     let updateData = { ...req.body };
 
     if (req.file) {
       const doctor = await doctorService.getDoctorById(tenantId, id);
-      
+
       if (!doctor) {
-        return res.status(404).json({ success: false, message: "Practitioner not found" });
+        return res
+          .status(404)
+          .json({ success: false, message: "Practitioner not found" });
       }
 
       if (doctor.imagePublicId) {
@@ -161,7 +193,11 @@ export const updateDoctor = async (req, res) => {
       updateData.imagePublicId = uploaded.publicId;
     }
 
-    const updatedDoctor = await doctorService.updateDoctor(tenantId, id, updateData);
+    const updatedDoctor = await doctorService.updateDoctor(
+      tenantId,
+      id,
+      updateData,
+    );
 
     if (!updatedDoctor) {
       return res.status(404).json({
@@ -184,8 +220,8 @@ export const updateDoctor = async (req, res) => {
 };
 
 /**
- * @desc    SOFT DELETE doctor
- * @access  Private (Admin Only)
+ * DELETE DOCTOR
+ * Performs a soft delete and removes assets from Cloudinary.
  */
 export const deleteDoctor = async (req, res) => {
   try {
@@ -199,7 +235,9 @@ export const deleteDoctor = async (req, res) => {
     const doctor = await doctorService.getDoctorById(tenantId, id);
 
     if (!doctor) {
-      return res.status(404).json({ success: false, message: "Practitioner not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Practitioner not found" });
     }
 
     if (doctor.imagePublicId) {

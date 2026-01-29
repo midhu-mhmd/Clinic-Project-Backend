@@ -11,6 +11,7 @@ import router from "./src/routes/userRoute.js";
 import tenantRoute from "./src/routes/tenantRoute.js";
 import paymentRoute from "./src/routes/paymentRoute.js";
 import doctorRouter from "./src/routes/doctorRoute.js";
+import appointmentRouter from "./src/routes/appointmentRoute.js";
 
 const app = express();
 
@@ -48,6 +49,7 @@ app.use("/api/users", router);
 app.use("/api/tenants", tenantRoute);
 app.use("/api/payments", paymentRoute);
 app.use("/api/doctors", doctorRouter);
+app.use("/api/appointments", appointmentRouter);
 
 // 4. CATCH 404 (For non-existent routes)
 app.use((req, res, next) => {

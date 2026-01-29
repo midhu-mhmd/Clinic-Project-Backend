@@ -1,12 +1,8 @@
 import Doctor from "../models/doctorModel.js";
 
-/**
- * Service layer for Medical Practitioners
- */
 class DoctorService {
-
   /**
-   * CREATE doctor
+   * CREATE: Initialize a new doctor profile under a specific tenant
    */
   async createDoctor(tenantId, doctorData, imageUrl = "", imagePublicId = "") {
     const doctor = new Doctor({
@@ -14,55 +10,75 @@ class DoctorService {
       tenantId,
       image: imageUrl,
       imagePublicId,
+      // Ensure numeric values are properly cast
       experience: Number(doctorData.experience) || 0,
+      consultationFee: Number(doctorData.consultationFee) || 0,
     });
 
     return await doctor.save();
   }
 
   /**
-   * NEW: GET ALL doctors across ALL clinics (Public/Patient view)
+   * READ: Fetch all doctors for the public directory (cross-tenant)
    */
   async getAllDoctorsPublic() {
-    // We remove the tenantId filter here to fetch every doctor in the database
-    // only filtering out those that are soft-deleted.
     return await Doctor.find({ isDeleted: { $ne: true } })
-      .populate("tenantId", "name") // Optional: brings in the clinic name
+      .populate("tenantId", "name")
       .sort({ createdAt: -1 });
   }
 
   /**
-   * GET ALL doctors for a specific tenant (Admin view)
+   * READ: Fetch all doctors belonging to a specific clinic (Tenant)
+   * This matches your frontend request: /api/doctors/clinic/:clinicId
    */
-  async getDoctors(tenantId) {
-    return await Doctor.find({ tenantId, isDeleted: { $ne: true } }).sort({ createdAt: -1 });
+  async getDoctorsByClinic(clinicId) {
+    return await Doctor.find({ 
+      tenantId: clinicId, 
+      isDeleted: { $ne: true } 
+    }).sort({
+      createdAt: -1,
+    });
   }
 
   /**
-   * GET SINGLE doctor
+   * READ: Admin/Staff view of doctors for a specific tenant
+   */
+  async getDoctors(tenantId) {
+    return await Doctor.find({ tenantId, isDeleted: { $ne: true } }).sort({
+      createdAt: -1,
+    });
+  }
+
+  /**
+   * READ: Get single doctor details (Private/Tenant restricted)
    */
   async getDoctorById(tenantId, doctorId) {
     return await Doctor.findOne({ _id: doctorId, tenantId });
   }
 
   /**
-   * NEW: GET SINGLE doctor by ID only (Public/Patient view)
-   * Required for the patient to see details without needing the admin's tenantId
+   * READ: Get single doctor details (Public)
    */
   async getDoctorByIdPublic(doctorId) {
     return await Doctor.findOne({ _id: doctorId, isDeleted: { $ne: true } });
   }
 
   /**
-   * UPDATE doctor
+   * UPDATE: Modify doctor details
    */
   async updateDoctor(tenantId, doctorId, updateData) {
     const dataToUpdate = { ...updateData };
 
+    // Explicitly handle numeric conversions for updates
     if (dataToUpdate.experience !== undefined) {
       dataToUpdate.experience = Number(dataToUpdate.experience) || 0;
     }
+    
+    if (dataToUpdate.consultationFee !== undefined) {
+      dataToUpdate.consultationFee = Number(dataToUpdate.consultationFee) || 0;
+    }
 
+    // Security: Prevent overriding the tenant link or ID
     delete dataToUpdate.tenantId;
     delete dataToUpdate._id;
 
@@ -70,16 +86,16 @@ class DoctorService {
       { _id: doctorId, tenantId },
       { $set: dataToUpdate },
       {
-        new: true, 
+        new: true,
         runValidators: true,
-      }
+      },
     );
 
     return updatedDoctor;
   }
 
   /**
-   * SOFT DELETE doctor
+   * DELETE: Soft delete a doctor profile
    */
   async softDeleteDoctor(tenantId, doctorId) {
     return await Doctor.findOneAndUpdate(
@@ -89,9 +105,9 @@ class DoctorService {
           isDeleted: true,
           deletedAt: new Date(),
           isActive: false,
-        }
+        },
       },
-      { new: true }
+      { new: true },
     );
   }
 }

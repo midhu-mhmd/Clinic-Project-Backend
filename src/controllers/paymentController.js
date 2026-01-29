@@ -4,9 +4,6 @@ import {
   createPaymentRecord,
 } from "../services/paymentService.js";
 
-// --- RAZORPAY FLOW ---
-
-// 1. Initiate Order
 export const createOrder = async (req, res) => {
   try {
     const { amount, plan } = req.body;
@@ -15,8 +12,6 @@ export const createOrder = async (req, res) => {
 
     const order = await createRazorpayOrderService(amount);
 
-    // Optional: Save pending order to DB here if you want to track drop-offs
-    
     res.status(200).json(order);
   } catch (error) {
     console.error("Create Order Error:", error);
@@ -24,7 +19,6 @@ export const createOrder = async (req, res) => {
   }
 };
 
-// 2. Verify & Complete (Call this after success on frontend)
 export const verifyOrder = async (req, res) => {
   try {
     const { 
@@ -36,14 +30,12 @@ export const verifyOrder = async (req, res) => {
       amount 
     } = req.body;
 
-    // Verify Signature
     await verifyPaymentSignature(
       razorpay_order_id,
       razorpay_payment_id,
       razorpay_signature
     );
 
-    // Save Successful Transaction
     const payment = await createPaymentRecord({
       email,
       amount,
@@ -62,9 +54,7 @@ export const verifyOrder = async (req, res) => {
   }
 };
 
-// --- MANUAL FLOW ---
 
-// 3. Submit Manual Payment
 export const submitManualPayment = async (req, res) => {
   try {
     const { email, amount, plan, transactionRef } = req.body;
@@ -73,17 +63,15 @@ export const submitManualPayment = async (req, res) => {
       return res.status(400).json({ message: "Transaction Reference (UTR) is required" });
     }
 
-    // Save as Pending
     const payment = await createPaymentRecord({
-      email: email || "unknown@user.com", // Fallback if user not logged in
+      email: email || "unknown@user.com", 
       amount,
       plan,
       method: "MANUAL",
-      status: "PENDING", // Needs admin approval
+      status: "PENDING", 
       transactionRef,
     });
 
-    // Optional: Trigger email to Admin to check bank account
 
     res.status(201).json({ 
       message: "Manual payment submitted for verification", 

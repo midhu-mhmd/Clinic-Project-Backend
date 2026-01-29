@@ -5,27 +5,32 @@ const appointmentSchema = new mongoose.Schema(
     patientId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true
+      required: true,
     },
     doctorId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Doctor",
-      required: true
+      required: true,
     },
     tenantId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Tenant",
-      required: true
+      required: true,
     },
     dateTime: {
       type: Date,
-      required: true
+      required: true,
+    },
+    consultationFee: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
     status: {
       type: String,
       enum: ["PENDING", "CONFIRMED", "CANCELLED", "COMPLETED"],
-      default: "PENDING"
-    }
+      default: "PENDING",
+    },
   },
   { timestamps: true }
 );

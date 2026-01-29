@@ -28,6 +28,14 @@ const doctorSchema = new mongoose.Schema(
       trim: true,
     },
 
+    // NEW FIELD: Consultation Fee
+    consultationFee: {
+      type: Number,
+      required: [true, "Please specify the consultation fee"],
+      min: [0, "Fee cannot be negative"],
+      default: 0,
+    },
+
     education: {
       type: String,
       default: "Medical Degree",
@@ -50,7 +58,6 @@ const doctorSchema = new mongoose.Schema(
       default: "09:00 AM - 05:00 PM",
     },
 
-    // ✅ Cloudinary fields
     image: {
       type: String,
       default: "",
@@ -66,7 +73,6 @@ const doctorSchema = new mongoose.Schema(
       default: true,
     },
 
-    // Soft Delete Fields
     isDeleted: {
       type: Boolean,
       default: false,
@@ -78,10 +84,9 @@ const doctorSchema = new mongoose.Schema(
       default: null,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
-// ✅ Global Query Middleware: exclude soft-deleted docs
 doctorSchema.pre(/^find/, function () {
   this.find({ isDeleted: { $ne: true } });
 });

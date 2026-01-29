@@ -1,9 +1,6 @@
 import User from "../models/userModel.js";
 import { createClient } from "redis";
 
-// =====================
-// REDIS CLIENT INIT
-// =====================
 const redisClient = createClient({
   url: process.env.REDIS_URL || "redis://127.0.0.1:6379",
 });
@@ -11,7 +8,6 @@ const redisClient = createClient({
 redisClient.on("error", (err) => console.log("❌ Redis Client Error:", err));
 redisClient.on("connect", () => console.log("✅ Redis Connected Successfully"));
 
-// Async IIFE to connect Redis safely
 (async () => {
   try {
     if (!redisClient.isOpen) await redisClient.connect();
@@ -20,46 +16,26 @@ redisClient.on("connect", () => console.log("✅ Redis Connected Successfully"))
   }
 })();
 
-// =====================
-// USER DATABASE HELPERS
-// =====================
-
 export const createUser = async (data) => {
   return await User.create(data);
 };
 
-/**
- * Get user by email including password (for login / bcrypt compare)
- */
 export const findUserByEmail = async (email) => {
   return await User.findOne({ email }).select("+password");
 };
 
-/**
- * Get user by ID, without password
- */
 export const findUserById = async (id) => {
   return await User.findById(id).select("-password");
 };
 
-/**
- * Update user password
- */
 export const updatePassword = async (email, hashedPassword) => {
   return await User.findOneAndUpdate(
     { email },
     { password: hashedPassword },
-    { new: true }
+    { new: true },
   );
 };
 
-// =====================
-// TEMP REGISTRATION / REDIS HELPERS
-// =====================
-
-/**
- * Store temporary registration info in Redis (10 mins)
- */
 export const saveTempRegistration = async (email, data) => {
   try {
     const key = `reg_otp:${email}`;
@@ -72,9 +48,6 @@ export const saveTempRegistration = async (email, data) => {
   }
 };
 
-/**
- * Retrieve temporary registration from Redis
- */
 export const getTempRegistration = async (email) => {
   try {
     const data = await redisClient.get(`reg_otp:${email}`);
@@ -85,9 +58,6 @@ export const getTempRegistration = async (email) => {
   }
 };
 
-/**
- * Delete temporary registration
- */
 export const deleteTempRegistration = async (email) => {
   try {
     await redisClient.del(`reg_otp:${email}`);
@@ -96,13 +66,6 @@ export const deleteTempRegistration = async (email) => {
   }
 };
 
-// =====================
-// OTP CACHE HELPERS
-// =====================
-
-/**
- * Store OTP in Redis for 5 minutes
- */
 export const saveOTPToCache = async (email, otp) => {
   try {
     const value = typeof otp === "string" ? otp : String(otp);
@@ -113,9 +76,6 @@ export const saveOTPToCache = async (email, otp) => {
   }
 };
 
-/**
- * Retrieve OTP from Redis
- */
 export const getOTPFromCache = async (email) => {
   try {
     return await redisClient.get(`otp:${email}`);
@@ -125,9 +85,6 @@ export const getOTPFromCache = async (email) => {
   }
 };
 
-/**
- * Delete OTP from Redis
- */
 export const deleteOTPFromCache = async (email) => {
   try {
     await redisClient.del(`otp:${email}`);

@@ -31,7 +31,6 @@ const userSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
-    // --- 👇 ADD THESE FIELDS TO FIX THE ERROR ---
     isVerified: {
       type: Boolean,
       default: false,
@@ -44,13 +43,12 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
-    // --- 👆 ---
     isActive: {
       type: Boolean,
       default: true,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 export default mongoose.model("User", userSchema);

@@ -1,10 +1,5 @@
 import cloudinary from "../config/cloudinary.js";
 
-/**
- * Upload image buffer to Cloudinary
- * @param {Buffer} buffer
- * @param {String} folder
- */
 export const uploadToCloudinary = (buffer, folder) => {
   return new Promise((resolve, reject) => {
     cloudinary.uploader
@@ -26,16 +21,12 @@ export const uploadToCloudinary = (buffer, folder) => {
         (error, result) => {
           if (error) reject(error);
           else resolve(result);
-        }
+        },
       )
       .end(buffer);
   });
 };
 
-/**
- * Delete image from Cloudinary
- * @param {String} publicId
- */
 export const deleteFromCloudinary = async (publicId) => {
   if (!publicId) return;
   await cloudinary.uploader.destroy(publicId);

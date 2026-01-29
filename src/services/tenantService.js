@@ -7,9 +7,6 @@ import jwt from "jsonwebtoken";
 import { createClient } from "redis";
 import mongoose from "mongoose";
 
-// =====================
-// REDIS OPTIMIZATION
-// =====================
 const redisClient = createClient({
   url: process.env.REDIS_URL || "redis://127.0.0.1:6379",
 });
@@ -26,13 +23,11 @@ const connectRedis = async () => {
 };
 connectRedis();
 
-// =====================
-// EMAIL CONFIGURATION
-// =====================
-// We wrap this in a helper to ensure it uses the latest env variables
 const getTransporter = () => {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    console.warn("⚠️ Warning: Email credentials missing from ENV. Mail will fail.");
+    console.warn(
+      "⚠️ Warning: Email credentials missing from ENV. Mail will fail.",
+    );
   }
   return nodemailer.createTransport({
     service: "gmail",
@@ -43,31 +38,23 @@ const getTransporter = () => {
   });
 };
 
-// ==========================================
-// AUTH & CLINIC REGISTRATION
-// ==========================================
-
-/**
- * @desc Registers Clinic and its Admin. 
- * Note: If your MongoDB doesn't support Replica Sets, 
- * we use a manual cleanup logic if the second step fails.
- */
 export const registerClinicTransaction = async (ownerData, clinicData) => {
   const emailLower = ownerData.email.toLowerCase().trim();
   let createdUser = null;
 
   try {
-    // 1. Pre-validation checks
     const existingUser = await User.findOne({ email: emailLower });
     if (existingUser) throw new Error("Email already registered.");
 
-    const existingClinic = await Tenant.findOne({ registrationId: clinicData.registrationId });
-    if (existingClinic) throw new Error("This Clinic Registration ID is already in use.");
+    const existingClinic = await Tenant.findOne({
+      registrationId: clinicData.registrationId,
+    });
+    if (existingClinic)
+      throw new Error("This Clinic Registration ID is already in use.");
 
     const hashedPassword = await bcrypt.hash(ownerData.password, 12);
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // 2. Create User
     createdUser = await User.create({
       ...ownerData,
       email: emailLower,
@@ -76,7 +63,6 @@ export const registerClinicTransaction = async (ownerData, clinicData) => {
       isVerified: false,
     });
 
-    // 3. Create Tenant
     const tenant = await Tenant.create({
       ...clinicData,
       ownerId: createdUser._id,
@@ -84,16 +70,13 @@ export const registerClinicTransaction = async (ownerData, clinicData) => {
       subscription: { plan: "FREE", status: "ACTIVE" },
     });
 
-    // 4. Link back
     createdUser.tenantId = tenant._id;
     await createdUser.save();
 
-    // 5. Verification Setup (Redis)
     if (redisClient.isOpen) {
       await redisClient.setEx(`otp:${emailLower}`, 600, otp);
     }
 
-    // 6. Dispatch Email
     const transporter = getTransporter();
     await transporter.sendMail({
       from: `"Medicare Systems" <${process.env.EMAIL_USER}>`,
@@ -105,15 +88,13 @@ export const registerClinicTransaction = async (ownerData, clinicData) => {
           <p>Your institutional verification code is:</p>
           <h1 style="letter-spacing: 5px; font-size: 32px;">${otp}</h1>
           <p>This code expires in 10 minutes.</p>
-        </div>`
+        </div>`,
     });
 
     return { user: createdUser, tenant };
-
   } catch (error) {
-    // MANUAL ROLLBACK: Since no replica set, delete user if tenant creation failed
     if (createdUser && !createdUser.tenantId) {
-        await User.findByIdAndDelete(createdUser._id);
+      await User.findByIdAndDelete(createdUser._id);
     }
     console.error("Registration Service Error:", error.message);
     throw error;
@@ -127,8 +108,9 @@ export const verifyUserEmail = async (email, otp) => {
 
   if (!redisClient.isOpen) throw new Error("Security service unavailable.");
   const storedOtp = await redisClient.get(`otp:${emailLower}`);
-  
-  if (!storedOtp || storedOtp !== String(otp)) throw new Error("Invalid or expired security code.");
+
+  if (!storedOtp || storedOtp !== String(otp))
+    throw new Error("Invalid or expired security code.");
 
   if (!user.isVerified) {
     await User.updateOne({ _id: user._id }, { $set: { isVerified: true } });
@@ -139,7 +121,7 @@ export const verifyUserEmail = async (email, otp) => {
   const token = jwt.sign(
     { id: user._id, role: user.role, tenantId: user.tenantId },
     process.env.JWT_SECRET,
-    { expiresIn: "7d" }
+    { expiresIn: "7d" },
   );
 
   return { token, user };
@@ -148,7 +130,7 @@ export const verifyUserEmail = async (email, otp) => {
 export const resendOTP = async (email) => {
   const emailLower = email.toLowerCase().trim();
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  
+
   await redisClient.setEx(`otp:${emailLower}`, 600, otp);
 
   const transporter = getTransporter();
@@ -160,35 +142,33 @@ export const resendOTP = async (email) => {
   });
 };
 
-// ==========================================
-// DASHBOARD & ANALYTICS
-// ==========================================
-
 export const getClinicStats = async (tenantId) => {
-  if (!mongoose.Types.ObjectId.isValid(tenantId)) throw new Error("Invalid Clinic Reference.");
+  if (!mongoose.Types.ObjectId.isValid(tenantId))
+    throw new Error("Invalid Clinic Reference.");
 
   const [totalDoctors, patientResult] = await Promise.all([
     Doctor.countDocuments({ tenantId, isDeleted: { $ne: true } }),
     Doctor.aggregate([
-      { $match: { tenantId: new mongoose.Types.ObjectId(tenantId), isDeleted: { $ne: true } } },
-      { $group: { _id: null, total: { $sum: "$patientsCount" } } }
-    ])
+      {
+        $match: {
+          tenantId: new mongoose.Types.ObjectId(tenantId),
+          isDeleted: { $ne: true },
+        },
+      },
+      { $group: { _id: null, total: { $sum: "$patientsCount" } } },
+    ]),
   ]);
 
   return {
     totalDoctors,
     totalPatients: patientResult[0]?.total || 0,
     todayAppointments: 0,
-    waitTime: 15
+    waitTime: 15,
   };
 };
 
-// ==========================================
-// PROFILE & DIRECTORY
-// ==========================================
-
 export const getAllPublicClinics = async () => {
-  return await Tenant.find({ "settings.isPublic": true }).select('-__v').lean();
+  return await Tenant.find({ "settings.isPublic": true }).select("-__v").lean();
 };
 
 export const getTenantProfile = async (tenantId) => {
@@ -200,7 +180,6 @@ export const getTenantProfile = async (tenantId) => {
 export const updateTenantSettings = async (tenantId, updateData) => {
   const finalUpdate = { ...updateData };
 
-  // Convert nested settings to dot notation to avoid overwriting the whole object
   if (updateData.settings) {
     Object.keys(updateData.settings).forEach((key) => {
       finalUpdate[`settings.${key}`] = updateData.settings[key];
@@ -211,7 +190,7 @@ export const updateTenantSettings = async (tenantId, updateData) => {
   return await Tenant.findByIdAndUpdate(
     tenantId,
     { $set: finalUpdate },
-    { new: true, runValidators: true, lean: true }
+    { new: true, runValidators: true, lean: true },
   );
 };
 
@@ -219,17 +198,19 @@ export const updateTenantImageService = async (tenantId, imageUrl) => {
   return await Tenant.findByIdAndUpdate(
     tenantId,
     { $set: { image: imageUrl } },
-    { new: true, lean: true }
+    { new: true, lean: true },
   );
 };
 
 export const getPublicDoctorsService = async (tenantId) => {
-  return await Doctor.find({ 
-    tenantId, 
-    isActive: true, 
+  return await Doctor.find({
+    tenantId,
+    isActive: true,
     isDeleted: { $ne: true },
-    status: { $in: ["On Duty", "On Break"] }
+    status: { $in: ["On Duty", "On Break"] },
   })
-  .select('name specialization education experience availability image rating status patientsCount')
-  .lean(); 
+    .select(
+      "name specialization education experience availability image rating status patientsCount",
+    )
+    .lean();
 };

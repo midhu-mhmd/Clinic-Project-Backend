@@ -5,64 +5,41 @@ import {
   getDoctorById,
   updateDoctor,
   deleteDoctor,
-  getPublicDoctorDirectory, // Import the new global directory controller
+  getPublicDoctorDirectory,
+  getDoctorsByClinic, // Import verified
 } from "../controllers/doctorController.js";
 import { protect } from "../middlewares/authMiddleware.js";
 import upload from "../middlewares/uploadMiddleware.js";
 
 const doctorRouter = express.Router();
 
-/**
- * --- PUBLIC ROUTES ---
- * Accessible by anyone (Patients)
- * These must be defined BEFORE doctorRouter.use(protect)
- */
-
-// GET all doctors from all clinics
+// --- 1. PUBLIC ROUTES ---
+// Routes accessible without a token
 doctorRouter.get("/directory", getPublicDoctorDirectory);
-
-// GET single doctor details (Public version)
 doctorRouter.get("/public/:id", getDoctorById);
 
-
-/**
- * --- PROTECTED ROUTES ---
- * Requires a valid token (Clinic Admins)
- */
+// --- 2. AUTHENTICATION MIDDLEWARE ---
+// All routes below this line require a valid Bearer token
 doctorRouter.use(protect);
 
-/**
- * @route   GET /api/doctors
- * @desc    Get doctors belonging ONLY to the logged-in admin's clinic
- */
+// --- 3. PROTECTED ROUTES ---
+
+// Get all doctors (Admin/Internal view)
 doctorRouter.get("/", getAllDoctors);
 
 /**
- * @route   GET /api/doctors/:id
+ * FETCH DOCTORS BY CLINIC
+ * Matches: GET /api/doctors/clinic/:clinicId
+ * Note: Placed above /:id to prevent "clinic" being treated as a doctor ID
  */
+doctorRouter.get("/clinic/:clinicId", getDoctorsByClinic);
+
+// Get specific doctor by ID
 doctorRouter.get("/:id", getDoctorById);
 
-/**
- * @route   POST /api/doctors
- */
-doctorRouter.post(
-  "/",
-  upload.single("image"),
-  createDoctor
-);
-
-/**
- * @route   PUT /api/doctors/:id
- */
-doctorRouter.put(
-  "/:id",
-  upload.single("image"),
-  updateDoctor
-);
-
-/**
- * @route   DELETE /api/doctors/:id
- */
+// Management Routes
+doctorRouter.post("/", upload.single("image"), createDoctor);
+doctorRouter.put("/:id", upload.single("image"), updateDoctor);
 doctorRouter.delete("/:id", deleteDoctor);
 
 export default doctorRouter;

@@ -22,7 +22,7 @@ const tenantSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      index: true, // Optimized for dashboard lookups
+      index: true,
     },
     address: {
       type: String,
@@ -30,7 +30,8 @@ const tenantSchema = new mongoose.Schema(
     },
     image: {
       type: String,
-      default: "https://images.unsplash.com/photo-1629909613654-2871b886daa4?q=80&w=800",
+      default:
+        "https://images.unsplash.com/photo-1629909613654-2871b886daa4?q=80&w=800",
     },
     tags: {
       type: [String],
@@ -45,34 +46,31 @@ const tenantSchema = new mongoose.Schema(
       isPublic: { type: Boolean, default: true },
     },
     subscription: {
-      plan: { 
-        type: String, 
-        enum: ["FREE", "PRO", "ENTERPRISE", "Professional"], 
-        default: "FREE" 
+      plan: {
+        type: String,
+        enum: ["FREE", "PRO", "ENTERPRISE", "Professional"],
+        default: "FREE",
       },
-      status: { 
-        type: String, 
-        enum: ["ACTIVE", "PAST_DUE", "CANCELED", "PENDING_VERIFICATION"], 
-        default: "ACTIVE" 
+      status: {
+        type: String,
+        enum: ["ACTIVE", "PAST_DUE", "CANCELED", "PENDING_VERIFICATION"],
+        default: "ACTIVE",
       },
       razorpayOrderId: String,
       razorpayPaymentId: String,
     },
   },
-  { 
+  {
     timestamps: true,
-    toJSON: { virtuals: true }, // Ensure virtuals are sent to frontend
-    toObject: { virtuals: true }
-  }
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
+  },
 );
 
-// ✅ Virtual for Frontend Compatibility
-// This allows frontend to use tenant.subscriptionPlan instead of tenant.subscription.plan
 tenantSchema.virtual("subscriptionPlan").get(function () {
   return this.subscription?.plan;
 });
 
-// ✅ Slug Generation logic remains the same
 tenantSchema.pre("validate", function () {
   if (this.name && !this.slug) {
     this.slug = this.name
