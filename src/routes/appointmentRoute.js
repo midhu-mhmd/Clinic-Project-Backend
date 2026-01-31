@@ -1,40 +1,37 @@
 import express from "express";
-import AppointmentController from "../controllers/appointmentController.js";
+import AppointmentController from "../controllers/AppointmentController.js";
 import { protect, restrictTo } from "../middlewares/authMiddleware.js";
 
 const appointmentRouter = express.Router();
 
-// All appointment routes require auth
+// All appointment routes require authentication
 appointmentRouter.use(protect);
 
-/**
- * Logged-in user's appointments:
- * - CLINIC_ADMIN => all tenant appointments (controller handles this)
- * - PATIENT      => only own appointments
- */
-appointmentRouter.get("/my-appointments", AppointmentController.getMyAppointments);
+// Create appointment
+appointmentRouter.post(
+  "/",
+  restrictTo("PATIENT", "CLINIC_ADMIN"),
+  AppointmentController.create
+);
 
-/**
- * Create appointment (patient-side booking by default in controller)
- */
-appointmentRouter.post("/", AppointmentController.create);
+// Logged-in user's appointments
+appointmentRouter.get(
+  "/my-appointments",
+  restrictTo("CLINIC_ADMIN", "PATIENT"),
+  AppointmentController.getMyAppointments
+);
 
-/**
- * Tenant-wide registry (admin/staff view)
- * IMPORTANT: Your token role is "CLINIC_ADMIN" (not "admin")
- */
+// Tenant-wide registry (admin view)
 appointmentRouter.get(
   "/",
-  restrictTo("CLINIC_ADMIN", "STAFF"), // add/remove based on your roles
+  restrictTo("CLINIC_ADMIN"),
   AppointmentController.getAll
 );
 
-/**
- * Update appointment status (admin/staff)
- */
+// Update appointment status (admin)
 appointmentRouter.patch(
   "/:id/status",
-  restrictTo("CLINIC_ADMIN", "STAFF"),
+  restrictTo("CLINIC_ADMIN"),
   AppointmentController.updateStatus
 );
 

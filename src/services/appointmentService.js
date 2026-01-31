@@ -3,90 +3,126 @@ import Doctor from "../models/doctorModel.js";
 import mongoose from "mongoose";
 
 class AppointmentService {
-  /**
-   * Create a new appointment with validation
-   * Handles multi-tenant validation and prevents double booking
-   */
-  async createAppointment(tenantId, appointmentData) {
+  // ---------- helpers ----------
+  #isValidObjectId(id) {
+    return id && mongoose.Types.ObjectId.isValid(id);
+  }
+
+  #parseDateTime(dateStr, slotStr) {
+    // dateStr: "YYYY-MM-DD"
+    // slotStr: "HH:mm"
+    if (!dateStr || !slotStr) return null;
+
+    const [y, m, d] = String(dateStr).split("-").map(Number);
+    const [hh, mm] = String(slotStr).split(":").map(Number);
+
+    if (
+      !y || !m || !d ||
+      Number.isNaN(hh) || Number.isNaN(mm) ||
+      hh < 0 || hh > 23 || mm < 0 || mm > 59
+    ) {
+      return null;
+    }
+
+    // Local time -> Date object
+    // (If you want strict UTC, we can do Date.UTC here)
+    const dt = new Date(y, m - 1, d, hh, mm, 0, 0);
+    if (Number.isNaN(dt.getTime())) return null;
+
+    return dt;
+  }
+
+  #normalizeFee(fee, doctor) {
+    if (fee !== undefined && fee !== null && fee !== "") {
+      const parsed = Number(fee);
+      if (Number.isNaN(parsed) || parsed < 0) throw new Error("Invalid consultation fee.");
+      return parsed;
+    }
+    const fallback = doctor.consultationFee ?? doctor.fee ?? 0;
+    return Number(fallback) || 0;
+  }
+
+  #normalizePatientInfo(appointmentData) {
     const {
-      doctorId,
-      patientId,
-      date,
-      slot,
-      fee, // can be string/number from UI
+      patientInfo,
+      patientName,
+      patientEmail,
+      patientContact,
+      contact,
+      symptoms,
+      notes,
     } = appointmentData;
 
-    // --- 1) VALIDATION + TYPE NORMALIZATION ---
-    if (!tenantId || !mongoose.Types.ObjectId.isValid(tenantId)) {
-      throw new Error("Invalid facility (tenant) context.");
-    }
-    if (!doctorId || !mongoose.Types.ObjectId.isValid(doctorId)) {
-      throw new Error("Invalid faculty identifier.");
-    }
-    if (!patientId || !mongoose.Types.ObjectId.isValid(patientId)) {
+    const info = patientInfo && typeof patientInfo === "object" ? patientInfo : {};
+
+    const name = String(info.name ?? patientName ?? "").trim();
+    const email = String(info.email ?? patientEmail ?? "").trim().toLowerCase();
+    const phone = String(info.contact ?? info.phone ?? patientContact ?? contact ?? "").trim();
+    const sx = String(info.symptoms ?? symptoms ?? notes ?? "").trim();
+
+    if (!name) throw new Error("Patient name is required.");
+    if (!phone) throw new Error("Patient contact is required.");
+
+    return { name, email, contact: phone, symptoms: sx };
+  }
+
+  /**
+   * Create a new appointment:
+   * - validates tenant/doctor/patient
+   * - prevents double booking
+   * - stores patient snapshot in patientInfo
+   */
+  async createAppointment(tenantId, appointmentData) {
+    const { doctorId, patientId, date, slot, fee } = appointmentData;
+
+    // --- 1) Validate IDs ---
+    if (!this.#isValidObjectId(tenantId)) throw new Error("Invalid facility (tenant) context.");
+    if (!this.#isValidObjectId(doctorId)) throw new Error("Invalid faculty identifier.");
+    if (!this.#isValidObjectId(patientId))
       throw new Error("Patient identifier is missing/invalid. Re-authentication required.");
-    }
-    if (!date || !slot) {
-      throw new Error("Date and slot are required.");
-    }
+
+    // --- 2) Parse datetime safely ---
+    const appointmentDateTime = this.#parseDateTime(date, slot);
+    if (!appointmentDateTime) throw new Error("Invalid date/slot format.");
 
     const tId = new mongoose.Types.ObjectId(tenantId);
     const dId = new mongoose.Types.ObjectId(doctorId);
     const pId = new mongoose.Types.ObjectId(patientId);
 
-    // --- 2) VERIFY DOCTOR + TENANT CONTEXT ---
-    const doctor = await Doctor.findById(dId);
-    if (!doctor) {
-      throw new Error("Faculty member not found in the registry.");
-    }
+    // --- 3) Verify doctor + tenant context ---
+    const doctor = await Doctor.findById(dId).select("tenantId consultationFee fee");
+    if (!doctor) throw new Error("Faculty member not found in the registry.");
 
-    if (doctor.tenantId?.toString() !== tId.toString()) {
-      console.error(
-        `Security/Data Mismatch: Doctor belongs to tenant ${doctor.tenantId} but request sent ${tId}`
-      );
+    if (String(doctor.tenantId) !== String(tId)) {
       throw new Error("Specified faculty member is not registered at this facility.");
     }
 
-    // --- 3) BUILD DATETIME ---
-    const appointmentDateTime = new Date(`${date}T${slot}:00`);
-    if (Number.isNaN(appointmentDateTime.getTime())) {
-      throw new Error("Invalid temporal format provided. Protocol initialization aborted.");
-    }
-
-    // --- 4) PREVENT DOUBLE BOOKING ---
-    const existingAppointment = await Appointment.findOne({
+    // --- 4) Prevent double booking ---
+    const clash = await Appointment.exists({
       doctorId: dId,
       tenantId: tId,
       dateTime: appointmentDateTime,
       status: { $in: ["PENDING", "CONFIRMED"] },
     });
 
-    if (existingAppointment) {
+    if (clash) {
       throw new Error("This temporal slot has already been synchronized with another protocol.");
     }
 
-    // --- 5) FEE NORMALIZATION ---
-    // Priority: explicit fee from request -> doctor.consultationFee -> doctor.fee -> 0
-    let normalizedFee = 0;
+    // --- 5) Normalize fee ---
+    const normalizedFee = this.#normalizeFee(fee, doctor);
 
-    if (fee !== undefined && fee !== null && fee !== "") {
-      const parsed = Number(fee);
-      if (Number.isNaN(parsed) || parsed < 0) {
-        throw new Error("Invalid consultation fee.");
-      }
-      normalizedFee = parsed;
-    } else {
-      const fallback = doctor.consultationFee ?? doctor.fee ?? 0;
-      normalizedFee = Number(fallback) || 0;
-    }
+    // --- 6) Normalize patient snapshot ---
+    const patientInfoNormalized = this.#normalizePatientInfo(appointmentData);
 
-    // --- 6) CREATE APPOINTMENT (Schema-aligned) ---
+    // --- 7) Create ---
     const created = await Appointment.create({
       tenantId: tId,
       doctorId: dId,
       patientId: pId,
+      patientInfo: patientInfoNormalized,
       dateTime: appointmentDateTime,
-      consultationFee: normalizedFee, // ✅ added/confirmed
+      consultationFee: normalizedFee,
       status: "PENDING",
     });
 
@@ -94,94 +130,67 @@ class AppointmentService {
   }
 
   /**
-   * Retrieves all records for a specific facility (Administrative View)
+   * Tenant appointments (Admin view)
    */
   async getTenantAppointments(tenantId, filters = {}) {
-    if (!tenantId || !mongoose.Types.ObjectId.isValid(tenantId)) {
-      throw new Error("Invalid facility (tenant) context.");
-    }
+    if (!this.#isValidObjectId(tenantId)) throw new Error("Invalid facility (tenant) context.");
 
     const tId = new mongoose.Types.ObjectId(tenantId);
 
-    return await Appointment.find({ tenantId: tId, ...filters })
-      .populate("doctorId", "name specialization consultationFee")
-      .populate("patientId", "name email")
-      .sort({ dateTime: 1 });
+    return Appointment.find({ tenantId: tId, ...filters })
+      .populate("doctorId", "name specialization consultationFee image")
+      .populate("patientId", "name email phone contact") // ✅ include contact
+      .sort({ dateTime: 1 })
+      .lean(); // ✅ faster for read APIs
   }
 
   /**
-   * Retrieves appointments for the authenticated user/patient
+   * Patient appointments
    */
   async getPatientAppointments(tenantId, patientId) {
-    if (!tenantId || !mongoose.Types.ObjectId.isValid(tenantId)) {
-      throw new Error("Invalid facility (tenant) context.");
-    }
-    if (!patientId || !mongoose.Types.ObjectId.isValid(patientId)) {
-      throw new Error("Invalid patient context.");
-    }
+    if (!this.#isValidObjectId(tenantId)) throw new Error("Invalid facility (tenant) context.");
+    if (!this.#isValidObjectId(patientId)) throw new Error("Invalid patient context.");
 
     const tId = new mongoose.Types.ObjectId(tenantId);
     const pId = new mongoose.Types.ObjectId(patientId);
 
-    return await Appointment.find({
-      tenantId: tId,
-      patientId: pId,
-    })
+    return Appointment.find({ tenantId: tId, patientId: pId })
       .populate("doctorId", "name specialization image")
-      .sort({ dateTime: -1 });
+      .sort({ dateTime: -1 })
+      .lean();
   }
 
-  /**
-   * Updates status with protocol validation
-   */
   async updateStatus(tenantId, appointmentId, status) {
-    const validStatuses = ["PENDING", "CONFIRMED", "CANCELLED", "COMPLETED"];
-    const normalizedStatus = (status || "").toUpperCase();
+    const valid = ["PENDING", "CONFIRMED", "CANCELLED", "COMPLETED"];
+    const normalized = String(status || "").toUpperCase();
 
-    if (!validStatuses.includes(normalizedStatus)) {
-      throw new Error("Invalid protocol status update requested.");
-    }
-
-    if (!tenantId || !mongoose.Types.ObjectId.isValid(tenantId)) {
-      throw new Error("Invalid facility (tenant) context.");
-    }
-    if (!appointmentId || !mongoose.Types.ObjectId.isValid(appointmentId)) {
-      throw new Error("Invalid protocol record identifier.");
-    }
+    if (!valid.includes(normalized)) throw new Error("Invalid protocol status update requested.");
+    if (!this.#isValidObjectId(tenantId)) throw new Error("Invalid facility (tenant) context.");
+    if (!this.#isValidObjectId(appointmentId)) throw new Error("Invalid protocol record identifier.");
 
     const tId = new mongoose.Types.ObjectId(tenantId);
 
-    const appointment = await Appointment.findOneAndUpdate(
+    const updated = await Appointment.findOneAndUpdate(
       { _id: appointmentId, tenantId: tId },
-      { status: normalizedStatus },
+      { status: normalized },
       { new: true }
-    );
+    ).lean();
 
-    if (!appointment) {
-      throw new Error("Protocol record not found in this facility's registry.");
-    }
-
-    return appointment;
+    if (!updated) throw new Error("Protocol record not found in this facility's registry.");
+    return updated;
   }
 
-  /**
-   * Protocol Deactivation (Soft Delete/Cancellation)
-   */
   async cancelAppointment(tenantId, appointmentId) {
-    if (!tenantId || !mongoose.Types.ObjectId.isValid(tenantId)) {
-      throw new Error("Invalid facility (tenant) context.");
-    }
-    if (!appointmentId || !mongoose.Types.ObjectId.isValid(appointmentId)) {
-      throw new Error("Invalid protocol record identifier.");
-    }
+    if (!this.#isValidObjectId(tenantId)) throw new Error("Invalid facility (tenant) context.");
+    if (!this.#isValidObjectId(appointmentId)) throw new Error("Invalid protocol record identifier.");
 
     const tId = new mongoose.Types.ObjectId(tenantId);
 
-    return await Appointment.findOneAndUpdate(
+    return Appointment.findOneAndUpdate(
       { _id: appointmentId, tenantId: tId },
       { status: "CANCELLED" },
       { new: true }
-    );
+    ).lean();
   }
 }
 
