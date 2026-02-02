@@ -9,12 +9,70 @@ import User from "../models/userModel.js";
 import Doctor from "../models/doctorModel.js";
 
 /* =========================================================
+   Small Utils
+========================================================= */
+const normalizeEmail = (email = "") => String(email).trim().toLowerCase();
+const normalizeRegId = (id = "") => String(id).trim().toUpperCase();
+
+const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
+
+const requireEnv = (key) => {
+  if (!process.env[key]) throw new Error(`${key} missing in env.`);
+};
+
+const generateOtp6 = () => String(Math.floor(100000 + Math.random() * 900000));
+
+const signToken = (user) => {
+  requireEnv("JWT_SECRET");
+
+  return jwt.sign(
+    {
+      id: user._id,
+      role: user.role,
+      tenantId: user.tenantId ? String(user.tenantId) : null,
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+};
+
+/**
+ * ✅ Plan picking (matches your Tenant model enum)
+ */
+const pickSubscriptionPlan = (clinicData) => {
+  const raw = clinicData?.subscription?.plan || clinicData?.plan || "PRO";
+  const plan = String(raw).toUpperCase();
+  const allowed = new Set(["PRO", "ENTERPRISE", "PROFESSIONAL"]);
+  return allowed.has(plan) ? plan : "PRO";
+};
+
+/**
+ * ✅ Prevent mass assignment: only pick allowed fields
+ */
+const pickOwnerFields = (ownerData = {}) => ({
+  name: String(ownerData.name || "").trim(),
+  email: normalizeEmail(ownerData.email),
+  password: String(ownerData.password || ""),
+  phone: ownerData.phone ? String(ownerData.phone).trim() : undefined,
+});
+
+const pickClinicFields = (clinicData = {}) => ({
+  name: String(clinicData.name || "").trim(),
+  registrationId: normalizeRegId(clinicData.registrationId),
+  address: String(clinicData.address || "").trim(),
+  image: clinicData.image ? String(clinicData.image).trim() : undefined,
+  tags: Array.isArray(clinicData.tags) ? clinicData.tags : undefined,
+  description: clinicData.description ? String(clinicData.description).trim() : undefined,
+  settings: clinicData.settings && typeof clinicData.settings === "object"
+    ? { ...clinicData.settings }
+    : undefined,
+});
+
+/* =========================================================
    Redis: safe singleton init (no parallel connects)
 ========================================================= */
 let redisClient;
 let redisInitPromise = null;
-
-const normalizeEmail = (email = "") => String(email).trim().toLowerCase();
 
 export const getRedisClient = () => redisClient;
 
@@ -40,15 +98,21 @@ export const initRedis = async () => {
   try {
     return await redisInitPromise;
   } finally {
-    // allow retry if connect fails
-    redisInitPromise = null;
+    redisInitPromise = null; // allow retry if failed
+  }
+};
+
+export const closeRedis = async () => {
+  try {
+    if (redisClient?.isOpen) await redisClient.quit();
+  } catch (e) {
+    console.error("Redis quit failed:", e.message);
   }
 };
 
 const setOtpInRedis = async (emailLower, otp) => {
   const client = await initRedis();
-  // 10 minutes
-  await client.setEx(`otp:${emailLower}`, 600, String(otp));
+  await client.setEx(`otp:${emailLower}`, 600, String(otp)); // 10 mins
 };
 
 const getOtpFromRedis = async (emailLower) => {
@@ -82,7 +146,6 @@ const getTransporter = () => {
     },
   });
 
-  // optional: verify once (non-blocking)
   transporter.verify().catch((e) => {
     console.error("❌ SMTP verify failed:", e.message);
   });
@@ -91,142 +154,107 @@ const getTransporter = () => {
 };
 
 /* =========================================================
-   Helpers
-========================================================= */
-const generateOtp6 = () => String(Math.floor(100000 + Math.random() * 900000));
-
-const signToken = (user) => {
-  if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET missing in env.");
-
-  return jwt.sign(
-    {
-      id: user._id,
-      role: user.role,
-      tenantId: user.tenantId ? String(user.tenantId) : null,
-    },
-    process.env.JWT_SECRET,
-    { expiresIn: "7d" }
-  );
-};
-
-const safeObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
-
-const pickSubscriptionPlan = (clinicData) => {
-  // If you want to choose plan at registration:
-  // clinicData?.subscription?.plan or clinicData?.plan
-  const planRaw =
-    clinicData?.subscription?.plan || clinicData?.plan || "PRO";
-
-  const plan = String(planRaw).toUpperCase();
-
-  // matches your updated Tenant model enum
-  const allowed = new Set(["PRO", "ENTERPRISE", "PROFESSIONAL"]);
-  if (!allowed.has(plan)) return "PRO";
-
-  return plan;
-};
-
-/* =========================================================
    ✅ REGISTER CLINIC TRANSACTION (atomic)
    - creates CLINIC_ADMIN + Tenant
    - stores OTP in redis
    - sends email (best-effort)
-   - subscription: PRO + PENDING_VERIFICATION by default (payment gate)
+   - subscription status = PENDING_VERIFICATION (payment gate)
 ========================================================= */
 export const registerClinicTransaction = async (ownerData, clinicData) => {
-  const session = await mongoose.startSession();
+  const owner = pickOwnerFields(ownerData);
+  const clinic = pickClinicFields(clinicData);
 
-  const emailLower = normalizeEmail(ownerData?.email);
-  if (!emailLower) throw new Error("Owner email is required.");
-  if (!ownerData?.password) throw new Error("Owner password is required.");
-  if (!clinicData?.registrationId) throw new Error("Clinic registrationId is required.");
-  if (!clinicData?.name) throw new Error("Clinic name is required.");
-  if (!clinicData?.address) throw new Error("Clinic address is required.");
+  if (!owner.email) throw new Error("Owner email is required.");
+  if (!owner.password) throw new Error("Owner password is required.");
+  if (!clinic.registrationId) throw new Error("Clinic registrationId is required.");
+  if (!clinic.name) throw new Error("Clinic name is required.");
+  if (!clinic.address) throw new Error("Clinic address is required.");
 
   const plan = pickSubscriptionPlan(clinicData);
 
-  // IMPORTANT: Payment gate default
-  // (Only after payment you set status = ACTIVE and store razorpay ids)
+  // ✅ Payment gate default
   const subscription = {
     plan,
     status: "PENDING_VERIFICATION",
   };
 
-  let createdUser;
-  let createdTenant;
+  const session = await mongoose.startSession();
 
   try {
-    await session.withTransaction(async () => {
-      // 1) ensure unique user
-      const existingUser = await User.findOne({ email: emailLower })
-        .session(session)
-        .lean();
-
-      if (existingUser) throw new Error("Email already registered.");
-
-      // 2) ensure unique clinic registrationId
-      const existingClinic = await Tenant.findOne({
-        registrationId: String(clinicData.registrationId).trim(),
-      })
-        .session(session)
-        .lean();
-
-      if (existingClinic) throw new Error("This Clinic Registration ID is already in use.");
-
-      // 3) hash password
-      const hashedPassword = await bcrypt.hash(String(ownerData.password), 12);
-
-      // 4) create user first
-      createdUser = await User.create(
-        [
-          {
-            ...ownerData,
-            email: emailLower,
-            password: hashedPassword,
-            role: "CLINIC_ADMIN",
-            isVerified: false,
-          },
-        ],
-        { session }
-      );
-
-      const userDoc = createdUser[0];
-
-      // 5) create tenant
-      createdTenant = await Tenant.create(
-        [
-          {
-            ...clinicData,
-            ownerId: userDoc._id,
-            settings: {
-              ...(clinicData.settings || {}),
-              isPublic: true,
-            },
-            subscription,
-          },
-        ],
-        { session }
-      );
-
-      const tenantDoc = createdTenant[0];
-
-      // 6) attach tenantId to user
-      userDoc.tenantId = tenantDoc._id;
-      await userDoc.save({ session });
+    // stronger txn guarantees
+    session.startTransaction({
+      readConcern: { level: "snapshot" },
+      writeConcern: { w: "majority" },
     });
 
-    // Transaction committed ✅
-    const user = Array.isArray(createdUser) ? createdUser[0] : createdUser;
-    const tenant = Array.isArray(createdTenant) ? createdTenant[0] : createdTenant;
+    // 1) ensure unique user email
+    const existingUser = await User.findOne({ email: owner.email })
+      .session(session)
+      .lean();
 
-    // OTP + email can be outside transaction (best-effort)
+    if (existingUser) throw new Error("Email already registered.");
+
+    // 2) ensure unique clinic registrationId
+    const existingClinic = await Tenant.findOne({ registrationId: clinic.registrationId })
+      .session(session)
+      .lean();
+
+    if (existingClinic) throw new Error("This Clinic Registration ID is already in use.");
+
+    // 3) hash password
+    const hashedPassword = await bcrypt.hash(owner.password, 12);
+
+    // 4) create user
+    const userDoc = await User.create(
+      [
+        {
+          name: owner.name,
+          email: owner.email,
+          password: hashedPassword,
+          phone: owner.phone,
+          role: "CLINIC_ADMIN",
+          isVerified: false,
+        },
+      ],
+      { session }
+    ).then((arr) => arr[0]);
+
+    // 5) create tenant
+    const tenantDoc = await Tenant.create(
+      [
+        {
+          name: clinic.name,
+          registrationId: clinic.registrationId,
+          address: clinic.address,
+          image: clinic.image,
+          tags: clinic.tags,
+          description: clinic.description,
+          ownerId: userDoc._id,
+          settings: {
+            ...(clinic.settings || {}),
+            isPublic: true,
+          },
+          subscription,
+        },
+      ],
+      { session }
+    ).then((arr) => arr[0]);
+
+    // 6) attach tenantId to user
+    userDoc.tenantId = tenantDoc._id;
+    await userDoc.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    // ✅ OTP + email outside transaction (best-effort)
     const otp = generateOtp6();
-    await setOtpInRedis(emailLower, otp);
+    await setOtpInRedis(owner.email, otp);
 
     try {
       await getTransporter().sendMail({
         from: `"Medicare Systems" <${process.env.EMAIL_USER}>`,
-        to: emailLower,
+        to: owner.email,
         subject: "Action Required: Verify Clinic Enrollment",
         html: `
           <div style="font-family:sans-serif; text-align:center; padding:20px; border:1px solid #eee;">
@@ -239,15 +267,22 @@ export const registerClinicTransaction = async (ownerData, clinicData) => {
       });
     } catch (mailErr) {
       console.error("📧 Mail send failed (register clinic):", mailErr.message);
-      // don’t fail registration for mail issues
     }
 
-    return { user, tenant };
+    return { user: userDoc, tenant: tenantDoc };
   } catch (error) {
+    try {
+      await session.abortTransaction();
+    } catch {}
+    session.endSession();
+
+    // nicer duplicate key errors
+    if (String(error?.message || "").includes("E11000")) {
+      throw new Error("Duplicate record detected (email/registrationId already exists).");
+    }
+
     console.error("Registration Service Error:", error.message);
     throw error;
-  } finally {
-    session.endSession();
   }
 };
 
@@ -304,7 +339,7 @@ export const resendOTP = async (email) => {
    ✅ CLINIC STATS (fast)
 ========================================================= */
 export const getClinicStats = async (tenantId) => {
-  if (!safeObjectId(tenantId)) throw new Error("Invalid Clinic Reference.");
+  if (!isValidObjectId(tenantId)) throw new Error("Invalid Clinic Reference.");
 
   const tId = new mongoose.Types.ObjectId(tenantId);
 
@@ -313,7 +348,7 @@ export const getClinicStats = async (tenantId) => {
     Doctor.aggregate([
       { $match: { tenantId: tId, isDeleted: { $ne: true } } },
       { $group: { _id: null, total: { $sum: "$patientsCount" } } },
-    ]),
+    ]).option({ maxTimeMS: 4000 }),
   ]);
 
   return {
@@ -326,47 +361,49 @@ export const getClinicStats = async (tenantId) => {
 
 /* =========================================================
    ✅ PUBLIC CLINICS (scalable)
-   - supports pagination + search
-   - still works if controller calls without args
+   - pagination + optional search
+   - projection + lean + maxTimeMS
 ========================================================= */
 export const getAllPublicClinics = async (options = {}) => {
-  const {
-    page = 1,
-    limit = 50,
-    search = "",
-    // if you really want "all", pass { limit: 10000 }
-  } = options;
+  const page = Math.max(Number(options.page) || 1, 1);
+  const limit = Math.min(Math.max(Number(options.limit) || 50, 1), 200);
+  const skip = (page - 1) * limit;
 
-  const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
-  const safePage = Math.max(Number(page) || 1, 1);
-  const skip = (safePage - 1) * safeLimit;
+  const q = { "settings.isPublic": true };
+  const search = String(options.search || "").trim();
 
-  const q = {
-    "settings.isPublic": true,
-  };
-
-  const s = String(search || "").trim();
-  if (s) {
+  /**
+   * NOTE:
+   * Regex search is OK for 5k clinics.
+   * For 50k+ clinics, move to:
+   * - MongoDB Atlas Search OR
+   * - text index + $text query
+   */
+  if (search) {
     q.$or = [
-      { name: { $regex: s, $options: "i" } },
-      { registrationId: { $regex: s, $options: "i" } },
-      { slug: { $regex: s, $options: "i" } },
+      { name: { $regex: search, $options: "i" } },
+      { registrationId: { $regex: search.toUpperCase(), $options: "i" } },
+      { slug: { $regex: search.toLowerCase(), $options: "i" } },
     ];
   }
 
+  const projection =
+    "name slug registrationId address image tags description settings subscription createdAt";
+
   const [items, total] = await Promise.all([
     Tenant.find(q)
-      .select("name slug registrationId address image tags description settings subscription createdAt")
+      .select(projection)
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(safeLimit)
-      .lean(),
-    Tenant.countDocuments(q),
+      .limit(limit)
+      .lean()
+      .maxTimeMS(4000),
+    Tenant.countDocuments(q).maxTimeMS(4000),
   ]);
 
   return {
-    page: safePage,
-    limit: safeLimit,
+    page,
+    limit,
     total,
     data: items,
   };
@@ -376,9 +413,9 @@ export const getAllPublicClinics = async (options = {}) => {
    ✅ TENANT PROFILE
 ========================================================= */
 export const getTenantProfile = async (tenantId) => {
-  if (!safeObjectId(tenantId)) throw new Error("Invalid Clinic Reference.");
+  if (!isValidObjectId(tenantId)) throw new Error("Invalid Clinic Reference.");
 
-  const tenant = await Tenant.findById(tenantId).lean();
+  const tenant = await Tenant.findById(tenantId).lean().maxTimeMS(4000);
   if (!tenant) throw new Error("Clinic profile does not exist.");
 
   return tenant;
@@ -388,7 +425,7 @@ export const getTenantProfile = async (tenantId) => {
    ✅ UPDATE TENANT SETTINGS (safe flatten)
 ========================================================= */
 export const updateTenantSettings = async (tenantId, updateData = {}) => {
-  if (!safeObjectId(tenantId)) throw new Error("Invalid Clinic Reference.");
+  if (!isValidObjectId(tenantId)) throw new Error("Invalid Clinic Reference.");
 
   const finalUpdate = { ...updateData };
 
@@ -399,11 +436,17 @@ export const updateTenantSettings = async (tenantId, updateData = {}) => {
     delete finalUpdate.settings;
   }
 
+  // security: prevent subscription overwrite here (keep it for payment flow)
+  delete finalUpdate.subscription;
+  delete finalUpdate.ownerId;
+
   const updated = await Tenant.findByIdAndUpdate(
     tenantId,
     { $set: finalUpdate },
     { new: true, runValidators: true }
-  ).lean();
+  )
+    .lean()
+    .maxTimeMS(4000);
 
   if (!updated) throw new Error("Clinic not found.");
   return updated;
@@ -413,23 +456,25 @@ export const updateTenantSettings = async (tenantId, updateData = {}) => {
    ✅ UPDATE TENANT IMAGE
 ========================================================= */
 export const updateTenantImageService = async (tenantId, imageUrl) => {
-  if (!safeObjectId(tenantId)) throw new Error("Invalid Clinic Reference.");
+  if (!isValidObjectId(tenantId)) throw new Error("Invalid Clinic Reference.");
 
   const updated = await Tenant.findByIdAndUpdate(
     tenantId,
-    { $set: { image: imageUrl } },
+    { $set: { image: String(imageUrl || "") } },
     { new: true }
-  ).lean();
+  )
+    .lean()
+    .maxTimeMS(4000);
 
   if (!updated) throw new Error("Clinic not found.");
   return updated;
 };
 
 /* =========================================================
-   ✅ PUBLIC DOCTORS
+   ✅ PUBLIC DOCTORS (fast)
 ========================================================= */
 export const getPublicDoctorsService = async (tenantId) => {
-  if (!safeObjectId(tenantId)) throw new Error("Invalid Clinic Reference.");
+  if (!isValidObjectId(tenantId)) throw new Error("Invalid Clinic Reference.");
 
   return Doctor.find({
     tenantId,
@@ -437,8 +482,7 @@ export const getPublicDoctorsService = async (tenantId) => {
     isDeleted: { $ne: true },
     status: { $in: ["On Duty", "On Break"] },
   })
-    .select(
-      "name specialization education experience availability image rating status patientsCount"
-    )
-    .lean();
+    .select("name specialization education experience availability image rating status patientsCount")
+    .lean()
+    .maxTimeMS(4000);
 };

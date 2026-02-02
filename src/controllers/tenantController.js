@@ -22,7 +22,12 @@ const catchAsync = (fn) => (req, res, next) =>
 
 const normalizeEmail = (email = "") => String(email).trim().toLowerCase();
 
-const signToken = (user, expiry = "1d") => {
+const toInt = (v, def) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : def;
+};
+
+const signToken = (user, expiry = "7d") => {
   if (!process.env.JWT_SECRET) {
     throw new Error("Internal Configuration Error: JWT_SECRET missing");
   }
@@ -39,26 +44,42 @@ const signToken = (user, expiry = "1d") => {
   );
 };
 
-const toInt = (v, def) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : def;
+/**
+ * ✅ Prevent mass assignment (only allow safe update fields)
+ */
+const pickAllowedTenantUpdate = (body = {}) => {
+  const update = {};
+
+  // Top-level allowed
+  if (body.name !== undefined) update.name = String(body.name).trim();
+  if (body.address !== undefined) update.address = String(body.address).trim();
+  if (body.description !== undefined) update.description = String(body.description).trim();
+  if (Array.isArray(body.tags)) update.tags = body.tags;
+
+  // Nested settings allowed
+  if (body.settings && typeof body.settings === "object") {
+    update.settings = {};
+    if (body.settings.themeColor !== undefined)
+      update.settings.themeColor = String(body.settings.themeColor).trim();
+    if (body.settings.isPublic !== undefined)
+      update.settings.isPublic = Boolean(body.settings.isPublic);
+  }
+
+  // ❌ Block subscription updates here
+  // (subscription should be updated only via payment/verification flow)
+  return update;
 };
 
 /* =========================================================
    ✅ PUBLIC DIRECTORY (scalable)
-   - supports pagination + search
-   - fast response (projection + lean in service)
+   - pagination + search
 ========================================================= */
 export const getDirectory = catchAsync(async (req, res) => {
   const page = Math.max(toInt(req.query.page, 1), 1);
   const limit = Math.min(Math.max(toInt(req.query.limit, 30), 1), 60);
   const search = String(req.query.search || "").trim();
 
-  const result = await tenantService.getAllPublicClinics({
-    page,
-    limit,
-    search,
-  });
+  const result = await tenantService.getAllPublicClinics({ page, limit, search });
 
   const clinics = result?.data || [];
   const formattedClinics = clinics.map((clinic, idx) => ({
@@ -66,10 +87,7 @@ export const getDirectory = catchAsync(async (req, res) => {
     indexId: String((page - 1) * limit + idx + 1).padStart(2, "0"),
     name: clinic.name || "Premier Health Clinic",
     location: clinic.address || "Regional Access",
-    tags:
-      Array.isArray(clinic.tags) && clinic.tags.length > 0
-        ? clinic.tags
-        : ["General Practice"],
+    tags: Array.isArray(clinic.tags) && clinic.tags.length ? clinic.tags : ["General Practice"],
     img:
       clinic.image ||
       "https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?q=80&w=800",
@@ -101,14 +119,18 @@ export const getClinicDoctorsPublic = catchAsync(async (req, res) => {
 
 /* =========================================================
    ✅ GET CLINIC BY ID (public)
+   - projection + maxTimeMS for safety
 ========================================================= */
 export const getClinicById = catchAsync(async (req, res) => {
-  const clinic = await Tenant.findById(req.params.id).lean();
+  const clinic = await Tenant.findById(req.params.id)
+    .select("name registrationId slug ownerId address image tags description settings subscription createdAt")
+    .lean()
+    .maxTimeMS(4000);
+
   if (!clinic) {
-    return res
-      .status(404)
-      .json({ success: false, message: "Clinic record not found." });
+    return res.status(404).json({ success: false, message: "Clinic record not found." });
   }
+
   return res.status(200).json({ success: true, data: clinic });
 });
 
@@ -118,10 +140,7 @@ export const getClinicById = catchAsync(async (req, res) => {
 export const createTenant = catchAsync(async (req, res) => {
   const { owner, clinic } = req.body;
 
-  const { user, tenant } = await tenantService.registerClinicTransaction(
-    owner,
-    clinic
-  );
+  const { user, tenant } = await tenantService.registerClinicTransaction(owner, clinic);
 
   // token issued even if not verified (your flow)
   const token = signToken(user);
@@ -141,42 +160,44 @@ export const createTenant = catchAsync(async (req, res) => {
       tenant: {
         id: tenant._id,
         name: tenant.name,
-        subscription: tenant.subscription,
+        subscription: tenant.subscription, // ok to show plan/status
       },
     },
   });
 });
 
 /* =========================================================
-   ✅ TENANT LOGIN (clinic admin)
+   ✅ TENANT LOGIN (clinic admin only)
 ========================================================= */
 export const loginTenant = catchAsync(async (req, res) => {
   const email = normalizeEmail(req.body.email);
   const { password } = req.body;
 
   if (!email || !password) {
-    return res
-      .status(400)
-      .json({ success: false, message: "Email and password are required." });
+    return res.status(400).json({ success: false, message: "Email and password are required." });
   }
 
-  // lean for speed
   const user = await User.findOne({ email })
     .select("+password role tenantId isVerified email")
-    .lean();
+    .lean()
+    .maxTimeMS(4000);
 
   if (!user) {
     return res.status(401).json({ success: false, message: "Invalid email or password." });
+  }
+
+  // ✅ clinic login endpoint = CLINIC_ADMIN only
+  if (user.role !== "CLINIC_ADMIN") {
+    return res.status(403).json({
+      success: false,
+      message: "Access denied. Clinic admin account required.",
+    });
   }
 
   const ok = await bcrypt.compare(password, user.password);
   if (!ok) {
     return res.status(401).json({ success: false, message: "Invalid email or password." });
   }
-
-  // Optional: ensure clinic-admin only in this login endpoint
-  // If you want clinic-only:
-  // if (user.role !== "CLINIC_ADMIN") return res.status(403).json({ success:false, message:"Forbidden" });
 
   const token = signToken(user);
 
@@ -244,9 +265,11 @@ export const getProfile = catchAsync(async (req, res) => {
 
 /* =========================================================
    ✅ UPDATE PROFILE (protected)
+   - blocks subscription edits here
 ========================================================= */
 export const updateProfile = catchAsync(async (req, res) => {
-  const updated = await tenantService.updateTenantSettings(req.user.tenantId, req.body);
+  const safeBody = pickAllowedTenantUpdate(req.body);
+  const updated = await tenantService.updateTenantSettings(req.user.tenantId, safeBody);
 
   return res.status(200).json({
     success: true,
@@ -266,16 +289,12 @@ export const uploadImage = catchAsync(async (req, res) => {
   const cloudinaryResult = await new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
       { folder: "clinic_logos" },
-      (error, result) => {
-        if (result) resolve(result);
-        else reject(error);
-      }
+      (error, result) => (result ? resolve(result) : reject(error))
     );
     stream.end(req.file.buffer);
   });
 
   const imageUrl = cloudinaryResult.secure_url;
-
   const updated = await tenantService.updateTenantImageService(req.user.tenantId, imageUrl);
 
   return res.status(200).json({
@@ -287,7 +306,6 @@ export const uploadImage = catchAsync(async (req, res) => {
 
 /* =========================================================
    ✅ FORGOT PASSWORD (clinic)
-   - sends OTP (best effort)
 ========================================================= */
 export const forgotPasswordClinic = catchAsync(async (req, res) => {
   const { email } = req.body;
@@ -332,7 +350,7 @@ export const resetPasswordClinic = catchAsync(async (req, res) => {
     { email: normalizeEmail(email) },
     { $set: { password: hashedPassword } },
     { new: false }
-  );
+  ).maxTimeMS(4000);
 
   return res.status(200).json({
     success: true,
@@ -353,7 +371,8 @@ export const changePassword = catchAsync(async (req, res) => {
     });
   }
 
-  const user = await User.findById(req.user.id).select("+password");
+  const user = await User.findById(req.user.id).select("+password").maxTimeMS(4000);
+
   if (!user) {
     return res.status(404).json({ success: false, message: "User not found." });
   }
@@ -373,7 +392,8 @@ export const changePassword = catchAsync(async (req, res) => {
    ✅ SECURITY SETTINGS (protected)
 ========================================================= */
 export const getSecuritySettings = catchAsync(async (req, res) => {
-  const user = await User.findById(req.user.id).lean();
+  const user = await User.findById(req.user.id).lean().maxTimeMS(4000);
+
   if (!user) {
     return res.status(404).json({ success: false, message: "User not found." });
   }

@@ -41,36 +41,30 @@ router.post("/reset-password", resetPasswordClinic);
 router.get("/all", getDirectory);
 
 /* =========================================================
-   PUBLIC CLINIC READ
+   PUBLIC CLINIC DOCTORS
 ========================================================= */
 router.get("/doctors/public/:clinicId", getClinicDoctorsPublic);
-
-/**
- * IMPORTANT:
- * Keep /:id near the bottom so it doesn't match other routes.
- */
-router.get("/:id", getClinicById);
 
 /* =========================================================
    PROTECTED (Clinic Admin)
 ========================================================= */
-router.get("/stats", protect, authorize("CLINIC_ADMIN"), getStats);
+router.use(protect, authorize("CLINIC_ADMIN"));
 
-router.get("/profile", protect, authorize("CLINIC_ADMIN"), getProfile);
-router.put("/update", protect, authorize("CLINIC_ADMIN"), updateProfile);
+router.get("/stats", getStats);
+router.get("/profile", getProfile);
+router.put("/update", updateProfile);
+router.put("/change-password", changePassword);
 
-// ✅ change-password must be protected (you missed protect previously)
-router.put("/change-password", protect, authorize("CLINIC_ADMIN"), changePassword);
-
-/* =========================================================
-   UPLOADS
-========================================================= */
 router.post(
   "/upload-image",
-  protect,
-  authorize("CLINIC_ADMIN"),
   upload.single("image"),
   uploadImage
 );
+
+/* =========================================================
+   PUBLIC CLINIC READ (KEEP LAST)
+   IMPORTANT: keep /:id at bottom to avoid route collisions
+========================================================= */
+router.get("/:id", getClinicById);
 
 export default router;
