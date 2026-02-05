@@ -16,55 +16,56 @@ import {
   updateProfile,
   uploadImage,
   getClinicDoctorsPublic,
+  activateSubscriptionAfterPayment,
 } from "../controllers/tenantController.js";
 
-import { protect, authorize } from "../middlewares/authMiddleware.js";
+import { protect, authorize, protectPayment } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
 /* =========================================================
-   PUBLIC AUTH (Clinic)
+   1. PUBLIC AUTH (Clinic Registration & Security)
 ========================================================= */
 router.post("/register", createTenant);
 router.post("/login", loginTenant);
-
 router.post("/verify-otp", verifyEmailOTP);
 router.post("/resend-otp", resendOTP);
-
 router.post("/forgot-password", forgotPasswordClinic);
 router.post("/reset-password", resetPasswordClinic);
 
 /* =========================================================
-   PUBLIC DIRECTORY (SCALE SAFE)
-   ✅ GET /api/tenants/all?page=1&limit=30&search=abc
+   2. PUBLIC DIRECTORY & PROFILE (Patient Facing)
+   - These must be BEFORE the protect middleware
 ========================================================= */
 router.get("/all", getDirectory);
-
-/* =========================================================
-   PUBLIC CLINIC DOCTORS
-========================================================= */
 router.get("/doctors/public/:clinicId", getClinicDoctorsPublic);
 
+// ✅ MOVED: Clinic Profile is now public
+// Place it before the auth shield so patients can view clinic details
+router.get("/:id", getClinicById); 
+
 /* =========================================================
-   PROTECTED (Clinic Admin)
+   3. PAYMENT FLOW (Temporary Payment Token)
+   - Used after OTP verify but before final subscription activation
 ========================================================= */
+router.post(
+  "/subscription/activate", 
+  protectPayment, 
+  authorize("CLINIC_ADMIN"), 
+  activateSubscriptionAfterPayment
+);
+
+/* =========================================================
+   4. PROTECTED ROUTES (Dashboard & Settings)
+   - Requires full AUTH token and CLINIC_ADMIN role
+========================================================= */
+
 router.use(protect, authorize("CLINIC_ADMIN"));
 
 router.get("/stats", getStats);
 router.get("/profile", getProfile);
-router.put("/update", updateProfile);
+router.patch("/profile", updateProfile);
 router.put("/change-password", changePassword);
-
-router.post(
-  "/upload-image",
-  upload.single("image"),
-  uploadImage
-);
-
-/* =========================================================
-   PUBLIC CLINIC READ (KEEP LAST)
-   IMPORTANT: keep /:id at bottom to avoid route collisions
-========================================================= */
-router.get("/:id", getClinicById);
+router.post("/upload-image", upload.single("image"), uploadImage);
 
 export default router;

@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import dotenv from "dotenv";
-import userModel from "../models/userModel.js";  
+import User from "../models/userModel.js";
 import connectDB from "../config/db.js";
 
 dotenv.config();
@@ -10,7 +10,7 @@ const seedSuperAdmin = async () => {
   try {
     await connectDB();
 
-    const existingAdmin = await userModel.findOne({
+    const existingAdmin = await User.findOne({
       email: "admin@platform.com"
     });
 
@@ -20,7 +20,7 @@ const seedSuperAdmin = async () => {
     }
     const hashedPassword = await bcrypt.hash("Admin@123", 10);
 
-    await userModel.create({
+    await User.create({
       name: "Platform Admin",
       email: "admin@platform.com",
       password: hashedPassword,

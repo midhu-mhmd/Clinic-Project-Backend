@@ -7,11 +7,8 @@ import {
 
 /**
  * Centralized error responder
- * - supports AppError (service errors)
- * - supports Mongo duplicate key
  */
 const sendError = (res, err, fallbackMessage = "Server error.") => {
-  // AppError from service layer
   if (err instanceof AppError) {
     return res.status(err.statusCode || 500).json({
       success: false,
@@ -20,16 +17,15 @@ const sendError = (res, err, fallbackMessage = "Server error.") => {
     });
   }
 
-  // Mongoose duplicate key (just in case)
   if (err?.code === 11000) {
     return res.status(409).json({
       success: false,
       code: "DUPLICATE_KEY",
-      message: "Duplicate record detected.",
+      message: "A practitioner with this email already exists in this facility.",
     });
   }
 
-  console.error(err);
+  console.error("Controller Error:", err);
   return res.status(500).json({
     success: false,
     message: err?.message || fallbackMessage,
@@ -37,10 +33,8 @@ const sendError = (res, err, fallbackMessage = "Server error.") => {
 };
 
 /**
- * FETCH BY CLINIC ID (PRIVATE LIST by clinicId)
- * Used by booking flow etc.
- * Your service earlier had getDoctorsByClinic(clinicId) (tenant-specific list).
- * If you want public-only, use getDoctorsByClinicPublic().
+ * FETCH BY CLINIC ID (PUBLIC)
+ * Used by patients to see doctors available at a specific clinic.
  */
 export const getDoctorsByClinic = async (req, res) => {
   try {
@@ -53,11 +47,8 @@ export const getDoctorsByClinic = async (req, res) => {
       });
     }
 
-    // If this is meant to be PUBLIC booking list, call public method:
-    // const doctors = await doctorService.getDoctorsByClinicPublic(clinicId);
-
-    // If this is tenant/admin view, call tenant-admin list:
-    const doctors = await doctorService.getDoctors(clinicId);
+    // ✅ FIXED: Call the PUBLIC method to filter for active/on-duty doctors only
+    const doctors = await doctorService.getDoctorsByClinicPublic(clinicId);
 
     return res.status(200).json({
       success: true,
@@ -71,7 +62,7 @@ export const getDoctorsByClinic = async (req, res) => {
 
 /**
  * PUBLIC DIRECTORY
- * Fetches all active doctors across all clinics.
+ * Fetches all active doctors across all clinics for the search page.
  */
 export const getPublicDoctorDirectory = async (req, res) => {
   try {
@@ -89,19 +80,12 @@ export const getPublicDoctorDirectory = async (req, res) => {
 
 /**
  * GET SINGLE DOCTOR
- * Supports:
- * - tenant restricted view if req.user.tenantId exists
- * - else public view
- *
- * NOTE: ideally keep separate endpoints:
- *  - /api/doctors/public/:id
- *  - /api/doctors/:id (protected)
- * But this works too.
+ * Smart routing: Provides full data for admins, sanitized data for patients.
  */
 export const getDoctorById = async (req, res) => {
   try {
     const { id } = req.params;
-    const tenantId = req.user?.tenantId;
+    const tenantId = req.user?.tenantId; // Presence of tenantId indicates Admin context
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -124,8 +108,8 @@ export const getDoctorById = async (req, res) => {
 };
 
 /**
- * GET ALL (PRIVATE)
- * Admin view for tenantId from token
+ * GET ALL (PRIVATE ADMIN)
+ * Admin view for the logged-in tenant only.
  */
 export const getAllDoctors = async (req, res) => {
   try {
@@ -152,8 +136,7 @@ export const getAllDoctors = async (req, res) => {
 
 /**
  * CREATE DOCTOR
- * ✅ plan limit enforced in service: createDoctor() calls assertTenantCanAddDoctor()
- * ✅ cloudinary upload happens first, but we cleanup if DB fails
+ * Handles Cloudinary upload with automatic rollback on DB failure.
  */
 export const createDoctor = async (req, res) => {
   let uploadedAsset = null;
@@ -189,13 +172,11 @@ export const createDoctor = async (req, res) => {
       data: doctor,
     });
   } catch (err) {
-    // Cleanup cloudinary if DB failed
+    // 🗑️ Cleanup Cloudinary if DB save failed
     if (uploadedAsset?.publicId) {
-      try {
-        await deleteFromCloudinary(uploadedAsset.publicId);
-      } catch (cleanupErr) {
-        console.error("Cloudinary cleanup failed:", cleanupErr?.message);
-      }
+      await deleteFromCloudinary(uploadedAsset.publicId).catch((e) => 
+        console.error("Cloudinary Cleanup Error:", e.message)
+      );
     }
     return sendError(res, err, "Failed to create practitioner.");
   }
@@ -203,8 +184,6 @@ export const createDoctor = async (req, res) => {
 
 /**
  * UPDATE DOCTOR
- * ✅ if file uploaded: delete old cloudinary asset, upload new
- * ✅ minimal DB read: we only need imagePublicId
  */
 export const updateDoctor = async (req, res) => {
   let newUpload = null;
@@ -213,33 +192,18 @@ export const updateDoctor = async (req, res) => {
     const { id } = req.params;
     const tenantId = req.user?.tenantId;
 
-    if (!tenantId) {
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized: tenant context missing.",
-      });
-    }
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid Practitioner ID.",
-      });
-    }
+    if (!tenantId) throw new AppError("Unauthorized.", 401);
 
     let updateData = { ...req.body };
 
-    // Image replacement flow
     if (req.file) {
-      // fetch minimal current doctor
       const current = await doctorService.getDoctorById(tenantId, id);
-
-      // delete previous cloudinary asset if exists
+      
+      // Delete old image if it exists
       if (current?.imagePublicId) {
-        await deleteFromCloudinary(current.imagePublicId);
+        await deleteFromCloudinary(current.imagePublicId).catch(() => {});
       }
 
-      // upload new
       newUpload = await uploadToCloudinary(req.file.buffer, "doctors");
       updateData.image = newUpload.url;
       updateData.imagePublicId = newUpload.publicId;
@@ -253,13 +217,8 @@ export const updateDoctor = async (req, res) => {
       data: updatedDoctor,
     });
   } catch (err) {
-    // cleanup new upload if update fails after upload
     if (newUpload?.publicId) {
-      try {
-        await deleteFromCloudinary(newUpload.publicId);
-      } catch (cleanupErr) {
-        console.error("Cloudinary rollback failed:", cleanupErr?.message);
-      }
+      await deleteFromCloudinary(newUpload.publicId).catch(() => {});
     }
     return sendError(res, err, "Failed to update practitioner.");
   }
@@ -267,31 +226,19 @@ export const updateDoctor = async (req, res) => {
 
 /**
  * DELETE DOCTOR
- * Soft delete + remove cloudinary asset
+ * Soft delete + Cloudinary image removal.
  */
 export const deleteDoctor = async (req, res) => {
   try {
     const { id } = req.params;
     const tenantId = req.user?.tenantId;
 
-    if (!tenantId) {
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized: tenant context missing.",
-      });
-    }
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid Practitioner ID.",
-      });
-    }
+    if (!tenantId) throw new AppError("Unauthorized.", 401);
 
     const doctor = await doctorService.getDoctorById(tenantId, id);
 
     if (doctor?.imagePublicId) {
-      await deleteFromCloudinary(doctor.imagePublicId);
+      await deleteFromCloudinary(doctor.imagePublicId).catch(() => {});
     }
 
     await doctorService.softDeleteDoctor(tenantId, id);
@@ -302,5 +249,31 @@ export const deleteDoctor = async (req, res) => {
     });
   } catch (err) {
     return sendError(res, err, "Failed to archive practitioner.");
+  }
+};
+/**
+ * GET SINGLE DOCTOR (PUBLIC)
+ * Expressly for the patient-facing profile page.
+ */
+export const getDoctorByIdPublic = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid Practitioner ID format.",
+      });
+    }
+
+    // Calls the service method that populates tenantId
+    const doctor = await doctorService.getDoctorByIdPublic(id);
+
+    return res.status(200).json({
+      success: true,
+      data: doctor,
+    });
+  } catch (err) {
+    return sendError(res, err, "Failed to retrieve practitioner profile.");
   }
 };

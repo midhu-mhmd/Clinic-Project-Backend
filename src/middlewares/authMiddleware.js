@@ -1,97 +1,113 @@
 import jwt from "jsonwebtoken";
 import User from "../models/userModel.js";
 
-/**
- * ✅ AUTH PROTECT MIDDLEWARE
- * - Validates Bearer token
- * - Loads user from DB
- * - Resolves tenantId safely (DB first, token fallback)
- */
+/* =========================================================
+   Helpers
+========================================================= */
+const getBearerToken = (req) => {
+  const authHeader = req.headers.authorization || req.headers.Authorization || "";
+  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
+
+  const parts = authHeader.split(" ");
+  if (parts.length !== 2) return null;
+
+  const token = parts[1];
+  // Filter out common frontend "empty" strings
+  if (!token || ["null", "undefined", "[object Object]"].includes(token)) return null;
+
+  return token;
+};
+
+const jwtErrorMessage = (err) => {
+  const msg = String(err?.message || "").toLowerCase();
+  if (msg.includes("jwt expired")) return "Session expired. Please login again.";
+  if (msg.includes("jwt malformed")) return "Invalid security token format.";
+  if (msg.includes("invalid signature")) return "Security signature mismatch.";
+  return "Authentication failed.";
+};
+
+/* =========================================================
+   ✅ AUTH PROTECT (Full Access)
+   - Requires purpose: "AUTH"
+========================================================= */
 export const protect = async (req, res, next) => {
   try {
-    const authHeader = req.headers.authorization || "";
+    if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET missing");
 
-    // 1) Must be "Bearer <token>"
-    if (!authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({
-        success: false,
-        message: "No token provided",
-      });
-    }
+    const token = getBearerToken(req);
+    if (!token) return res.status(401).json({ success: false, message: "No token provided." });
 
-    // 2) Extract token
-    const token = authHeader.split(" ")[1];
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        message: "No token provided",
-      });
-    }
-
-    // 3) Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // 4) Load user from DB
-    const user = await User.findById(decoded.id).select("-password").lean();
-
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: "User not found",
+    // 🛡️ SECURITY GATE: Only allow full AUTH tokens
+    if (decoded.purpose !== "AUTH") {
+      return res.status(403).json({ 
+        success: false, 
+        message: "Access denied. Please complete payment and login again." 
       });
     }
 
-    /**
-     * ✅ Tenant Resolution Rule:
-     * - DB tenantId is source of truth
-     * - If DB tenantId missing, fallback to token tenantId
-     * - Avoid overwriting DB tenantId with null from token
-     */
-    const resolvedTenantId = user.tenantId || decoded.tenantId || null;
+    const user = await User.findById(decoded.id).select("-password").lean();
+    if (!user) return res.status(401).json({ success: false, message: "User no longer exists." });
 
-    // 5) Attach user to request
     req.user = {
       ...user,
-      tenantId: resolvedTenantId,
+      id: String(user._id),
+      tenantId: user.tenantId ? String(user.tenantId) : (decoded.tenantId ? String(decoded.tenantId) : null),
     };
 
-    return next();
+    next();
   } catch (err) {
-    console.error("protect middleware error:", err.message);
-
-    return res.status(401).json({
-      success: false,
-      message: "Not authorized",
-    });
+    return res.status(401).json({ success: false, message: jwtErrorMessage(err) });
   }
 };
 
-/**
- * ✅ ROLE BASED ACCESS CONTROL
- * Usage:
- * restrictTo("CLINIC_ADMIN", "STAFF")
- */
+/* =========================================================
+   ✅ PAYMENT PROTECT (Restricted Access)
+   - Allows purpose: "PAYMENT" or "AUTH"
+========================================================= */
+export const protectPayment = async (req, res, next) => {
+  try {
+    if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET missing");
+
+    const token = getBearerToken(req);
+    if (!token) return res.status(401).json({ success: false, message: "No token provided." });
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    // 🛡️ SECURITY GATE: Allow Payment OR Auth (in case an active user is renewing/upgrading)
+    if (!["PAYMENT", "AUTH"].includes(decoded.purpose)) {
+      return res.status(403).json({ success: false, message: "Invalid token for payment activation." });
+    }
+
+    const user = await User.findById(decoded.id).select("-password").lean();
+    if (!user) return res.status(401).json({ success: false, message: "User no longer exists." });
+
+    req.user = {
+      ...user,
+      id: String(user._id),
+      tenantId: user.tenantId ? String(user.tenantId) : (decoded.tenantId ? String(decoded.tenantId) : null),
+    };
+
+    next();
+  } catch (err) {
+    return res.status(401).json({ success: false, message: jwtErrorMessage(err) });
+  }
+};
+
+/* =========================================================
+   ✅ AUTHORIZATION
+========================================================= */
 export const restrictTo = (...roles) => {
   return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        message: "Not authorized",
-      });
-    }
-
-    if (!roles.includes(req.user.role)) {
+    if (!req.user || !roles.includes(req.user.role)) {
       return res.status(403).json({
         success: false,
-        message: "You do not have permission to perform this action",
+        message: "Access Denied: Required permissions missing.",
       });
     }
-
-    return next();
+    next();
   };
 };
 
-/**
- * ✅ Optional alias (same as restrictTo)
- */
 export const authorize = (...roles) => restrictTo(...roles);

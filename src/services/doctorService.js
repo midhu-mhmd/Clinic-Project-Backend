@@ -3,7 +3,7 @@ import Tenant from "../models/tenantModel.js";
 import mongoose from "mongoose";
 
 /**
- * Small helper to throw typed errors (controller can map status)
+ * Custom Error Class for Service Layer
  */
 class AppError extends Error {
   constructor(message, statusCode = 500, code = "SERVER_ERROR") {
@@ -14,10 +14,7 @@ class AppError extends Error {
 }
 
 /**
- * Plan limits
- * PRO          -> 3
- * ENTERPRISE   -> 5
- * PROFESSIONAL -> unlimited
+ * Plan Limit Helper
  */
 const getPlanLimit = (plan) => {
   const p = String(plan || "").toUpperCase();
@@ -28,7 +25,7 @@ const getPlanLimit = (plan) => {
 };
 
 /**
- * Normalize doctor payload (casting + sanitization)
+ * Data Sanitization & Normalization
  */
 const normalizeDoctorData = (doctorData = {}) => {
   const data = { ...doctorData };
@@ -52,16 +49,14 @@ const normalizeDoctorData = (doctorData = {}) => {
 
 class DoctorService {
   /**
-   * ✅ PLAN CHECK (fast + safe)
-   * - subscription must be ACTIVE
-   * - count only non-deleted doctors
+   * ✅ PLAN CHECK
+   * Ensures tenant is active and hasn't exceeded their doctor quota.
    */
   async assertTenantCanAddDoctor(tenantId) {
     if (!mongoose.Types.ObjectId.isValid(tenantId)) {
       throw new AppError("Invalid tenantId.", 400, "INVALID_TENANT");
     }
 
-    // lean + select only what we need
     const tenant = await Tenant.findById(tenantId)
       .select("subscription.plan subscription.status")
       .lean();
@@ -82,10 +77,8 @@ class DoctorService {
     const plan = String(tenant.subscription?.plan || "").toUpperCase();
     const limit = getPlanLimit(plan);
 
-    // PROFESSIONAL => Infinity
     if (limit === Infinity) return { plan, limit };
 
-    // Count only active docs (not deleted)
     const currentCount = await Doctor.countDocuments({
       tenantId,
       isDeleted: { $ne: true },
@@ -103,12 +96,10 @@ class DoctorService {
   }
 
   /**
-   * ✅ CREATE doctor (plan based)
-   * Industry approach: enforce plan check in service layer
+   * ✅ CREATE DOCTOR
    */
   async createDoctor(tenantId, doctorData, imageUrl = "", imagePublicId = "") {
     await this.assertTenantCanAddDoctor(tenantId);
-
     const data = normalizeDoctorData(doctorData);
 
     try {
@@ -118,10 +109,8 @@ class DoctorService {
         image: imageUrl,
         imagePublicId,
       });
-
       return doctor;
     } catch (err) {
-      // Duplicate email within same tenant (unique index tenantId+email)
       if (err?.code === 11000) {
         throw new AppError(
           "Doctor email already exists in this clinic.",
@@ -134,8 +123,7 @@ class DoctorService {
   }
 
   /**
-   * READ: Public directory (cross-tenant)
-   * ✅ performance: lean, select only needed fields, minimal populate
+   * ✅ READ: Public Directory (Cross-tenant)
    */
   async getAllDoctorsPublic() {
     return Doctor.find({
@@ -151,8 +139,7 @@ class DoctorService {
   }
 
   /**
-   * READ: Clinic public doctors
-   * ✅ used by: /api/tenants/doctors/public/:clinicId
+   * ✅ READ: Clinic-Specific Public Doctors
    */
   async getDoctorsByClinicPublic(clinicId) {
     if (!mongoose.Types.ObjectId.isValid(clinicId)) {
@@ -172,8 +159,7 @@ class DoctorService {
   }
 
   /**
-   * READ: Tenant admin view doctors
-   * ✅ performance: lean + select
+   * ✅ READ: Tenant Admin View
    */
   async getDoctors(tenantId) {
     if (!mongoose.Types.ObjectId.isValid(tenantId)) {
@@ -189,13 +175,10 @@ class DoctorService {
   }
 
   /**
-   * READ: Single doctor (tenant restricted)
+   * ✅ READ: Single Doctor (Admin View)
    */
   async getDoctorById(tenantId, doctorId) {
-    if (
-      !mongoose.Types.ObjectId.isValid(tenantId) ||
-      !mongoose.Types.ObjectId.isValid(doctorId)
-    ) {
+    if (!mongoose.Types.ObjectId.isValid(tenantId) || !mongoose.Types.ObjectId.isValid(doctorId)) {
       throw new AppError("Invalid id.", 400, "INVALID_ID");
     }
 
@@ -210,7 +193,8 @@ class DoctorService {
   }
 
   /**
-   * READ: Single doctor public
+   * ✅ READ: Single Doctor Public (The React Profile Fix)
+   * Populates tenantId so the frontend can retrieve clinicId/clinicName.
    */
   async getDoctorByIdPublic(doctorId) {
     if (!mongoose.Types.ObjectId.isValid(doctorId)) {
@@ -219,8 +203,9 @@ class DoctorService {
 
     const doctor = await Doctor.findOne({ _id: doctorId })
       .select(
-        "name specialization consultationFee education experience status availability image createdAt"
+        "name specialization consultationFee education experience status availability image createdAt tenantId about"
       )
+      .populate("tenantId", "name slug") 
       .lean();
 
     if (!doctor) throw new AppError("Doctor not found.", 404, "DOCTOR_NOT_FOUND");
@@ -228,24 +213,17 @@ class DoctorService {
   }
 
   /**
-   * UPDATE doctor
-   * ✅ never allow tenantId/_id override
-   * ✅ handle duplicate email errors
+   * ✅ UPDATE DOCTOR
    */
   async updateDoctor(tenantId, doctorId, updateData) {
-    if (
-      !mongoose.Types.ObjectId.isValid(tenantId) ||
-      !mongoose.Types.ObjectId.isValid(doctorId)
-    ) {
+    if (!mongoose.Types.ObjectId.isValid(tenantId) || !mongoose.Types.ObjectId.isValid(doctorId)) {
       throw new AppError("Invalid id.", 400, "INVALID_ID");
     }
 
     const dataToUpdate = normalizeDoctorData(updateData);
-
     delete dataToUpdate.tenantId;
     delete dataToUpdate._id;
     delete dataToUpdate.isDeleted;
-    delete dataToUpdate.deletedAt;
 
     try {
       const updated = await Doctor.findOneAndUpdate(
@@ -269,13 +247,10 @@ class DoctorService {
   }
 
   /**
-   * DELETE (soft)
+   * ✅ SOFT DELETE
    */
   async softDeleteDoctor(tenantId, doctorId) {
-    if (
-      !mongoose.Types.ObjectId.isValid(tenantId) ||
-      !mongoose.Types.ObjectId.isValid(doctorId)
-    ) {
+    if (!mongoose.Types.ObjectId.isValid(tenantId) || !mongoose.Types.ObjectId.isValid(doctorId)) {
       throw new AppError("Invalid id.", 400, "INVALID_ID");
     }
 

@@ -1,9 +1,9 @@
 import express from "express";
-
 import {
   createDoctor,
   getAllDoctors,
-  getDoctorById,
+  getDoctorById,       // Admin Version
+  getDoctorByIdPublic, // Public Version (Critical for your Profile page)
   updateDoctor,
   deleteDoctor,
   getPublicDoctorDirectory,
@@ -20,20 +20,18 @@ const doctorRouter = express.Router();
  * =========================
  * 1) PUBLIC ROUTES (NO TOKEN)
  * =========================
- * For patient-side booking / public directory.
  */
 
-// All doctors directory (across tenants) - public listing
+// All doctors directory
 doctorRouter.get("/directory", getPublicDoctorDirectory);
 
-// Booking: doctors by clinicId (public list)
-// NOTE: This endpoint should return only active doctors.
-// Ensure your controller uses doctorService.getDoctorsByClinicPublic(clinicId)
-// or ensure service method filters active / not deleted.
+// Public list of doctors for a specific clinic
 doctorRouter.get("/public/clinic/:clinicId", getDoctorsByClinic);
 
-// Public single doctor profile
-doctorRouter.get("/public/:id", getDoctorById);
+// ✅ FIX: Use a dedicated public controller
+// This ensures 'tenantId' is populated and 'isDeleted' docs are hidden
+doctorRouter.get("/public/:id", getDoctorByIdPublic);
+
 
 /**
  * =========================
@@ -41,11 +39,6 @@ doctorRouter.get("/public/:id", getDoctorById);
  * =========================
  */
 doctorRouter.use(protect);
-
-/**
- * Only clinic admins should manage doctors under their tenant.
- * If you have STAFF role too, add it here.
- */
 doctorRouter.use(authorize("CLINIC_ADMIN"));
 
 /**
@@ -54,13 +47,13 @@ doctorRouter.use(authorize("CLINIC_ADMIN"));
  * =========================
  */
 
-// Admin: list doctors for logged-in tenant
+// List all doctors for the logged-in tenant
 doctorRouter.get("/", getAllDoctors);
 
-// Admin: get single doctor
+// Get specific doctor (Admin view - sees more details)
 doctorRouter.get("/:id", getDoctorById);
 
-// Admin: create doctor (PLAN LIMIT + PAYMENT STATUS enforced)
+// Create doctor with plan enforcement and image upload
 doctorRouter.post(
   "/",
   enforceDoctorLimit,
@@ -68,10 +61,10 @@ doctorRouter.post(
   createDoctor
 );
 
-// Admin: update doctor
+// Update doctor details
 doctorRouter.put("/:id", upload.single("image"), updateDoctor);
 
-// Admin: soft delete doctor
+// Soft delete doctor
 doctorRouter.delete("/:id", deleteDoctor);
 
 export default doctorRouter;

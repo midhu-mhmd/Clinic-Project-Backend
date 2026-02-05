@@ -7,53 +7,73 @@ import {
   archivePlan,
 } from "../controllers/planController.js";
 
-// Middleware imports
 import { protect, restrictTo } from "../middlewares/authMiddleware.js";
-// import { validatePlan, validatePlanUpdate } from "../middlewares/validators/planValidator.js";
+
+// Optional validation middleware (recommended)
+// import {
+//   validateCreatePlan,
+//   validateUpdatePlan,
+//   validateObjectIdParam,
+// } from "../middlewares/validators/planValidator.js";
 
 const router = express.Router();
 
+/* -------------------------------------------------------------------------- */
+/* PUBLIC ROUTES                                                              */
+/* -------------------------------------------------------------------------- */
+
 /**
- * @route   GET /api/v1/plans
- * @desc    Fetch available subscription tiers for landing/pricing pages
- * @access  Public
+ * GET /api/v1/plans
+ * Public pricing tiers (active only)
  */
 router.get("/", getPublicPlans);
 
 /**
- * @route   GET /api/v1/plans/:id
- * @desc    Fetch specific plan details by ID or Slug
- * @access  Public
+ * Recommended: Separate slug endpoint
+ * GET /api/v1/plans/slug/:slug
+ * This avoids ambiguity between ObjectId and slug.
+ *
+ * If you implement this, add controller method getPlanBySlug
+ * router.get("/slug/:slug", getPlanBySlug);
  */
-router.get("/:id", getPlan);
+
+/**
+ * GET /api/v1/plans/:planId
+ * Public plan details by Mongo ObjectId
+ *
+ * NOTE:
+ * - Kept as ObjectId only to prevent collisions/ambiguity.
+ * - Validation middleware recommended.
+ */
+// router.get("/:planId", validateObjectIdParam("planId"), getPlan);
+router.get("/:planId", getPlan);
 
 /* -------------------------------------------------------------------------- */
-/* ADMINISTRATIVE AREA                             */
+/* ADMIN ROUTES (Protected + RBAC)                                            */
 /* -------------------------------------------------------------------------- */
 
-// Apply protection to all subsequent routes
 router.use(protect);
 router.use(restrictTo("super-admin"));
 
 /**
- * @route   POST /api/v1/plans
- * @desc    Create a new subscription tier
- * @access  Private (Super-Admin)
+ * POST /api/v1/plans
+ * Create new plan tier
  */
+// router.post("/", validateCreatePlan, createPlan);
 router.post("/", createPlan);
 
 /**
- * @route   PATCH /api/v1/plans/:id
- * @desc    Update specific fields of an existing plan
- * @access  Private (Super-Admin)
+ * PATCH /api/v1/plans/:planId
+ * Partial update for plan
  */
-router.patch("/:id", updatePlan);
+// router.patch("/:planId", validateObjectIdParam("planId"), validateUpdatePlan, updatePlan);
+router.patch("/:planId", updatePlan);
 
 /**
- * @route   DELETE /api/v1/plans/:id
- * @desc    Decommission/Archive a plan (Soft Delete)
- * @access  Private (Super-Admin)
+ * DELETE /api/v1/plans/:planId
+ * Soft-archive plan
  */
-router.delete("/:id", archivePlan);
+// router.delete("/:planId", validateObjectIdParam("planId"), archivePlan);
+router.delete("/:planId", archivePlan);
 
 export default router;
