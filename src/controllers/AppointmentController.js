@@ -1,23 +1,85 @@
 import AppointmentService from "../services/appointmentService.js";
 
+/* ----------------------------- helpers ----------------------------- */
 const normalizeStr = (v) => String(v ?? "").trim();
 const normalizeEmail = (v) => normalizeStr(v).toLowerCase();
 
-const resolveUserId = (req) => req.user?._id || req.user?.id;
+const resolveUserId = (req) => req.user?._id || req.user?.id || null;
 
 const resolveTenantIdForPatient = (req) =>
   req.query?.tenantId || req.body?.tenantId || null;
 
-const resolveFee = (raw) => {
-  const n = Number(raw?.fee ?? raw?.consultationFee ?? 0);
-  return Number.isFinite(n) ? n : 0;
+const resolveFeeNumber = (raw) => {
+  const n = Number(raw?.consultationFee ?? raw?.fee ?? 0);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
 };
 
+/**
+ * Accept two input shapes:
+ *  A) date + slot  (recommended)
+ *  B) dateTime ISO (optional)
+ *
+ * If dateTime is given, we convert it to { date, slot } for service compatibility.
+ */
+const resolveDateSlot = (raw) => {
+  // preferred
+  if (raw?.date && raw?.slot) {
+    return { date: normalizeStr(raw.date), slot: normalizeStr(raw.slot) };
+  }
+
+  const dt = raw?.dateTime || raw?.datetime || null;
+  if (!dt) return { date: "", slot: "" };
+
+  const d = new Date(dt);
+  if (Number.isNaN(d.getTime())) return { date: "", slot: "" };
+
+  const pad = (n) => String(n).padStart(2, "0");
+  const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const slot = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+  return { date, slot };
+};
+
+const buildPatientInfoSnapshot = (raw = {}) => {
+  const incoming =
+    raw.patientInfo && typeof raw.patientInfo === "object"
+      ? raw.patientInfo
+      : null;
+
+  const snapshot = incoming
+    ? {
+        name: normalizeStr(incoming.name),
+        email: normalizeEmail(incoming.email),
+        contact: normalizeStr(incoming.contact || incoming.phone),
+        symptoms: normalizeStr(incoming.symptoms),
+      }
+    : {
+        name: normalizeStr(raw.patientName || raw.name),
+        email: normalizeEmail(raw.patientEmail || raw.email),
+        contact: normalizeStr(raw.patientContact || raw.contact || raw.phone),
+        symptoms: normalizeStr(raw.symptoms || raw.notes),
+      };
+
+  if (!snapshot.name) {
+    return { error: "Patient name is required." };
+  }
+  if (!snapshot.contact) {
+    return { error: "Patient contact is required." };
+  }
+
+  return { snapshot };
+};
+
+/* ----------------------------- controller ----------------------------- */
 class AppointmentController {
   /**
-   * Create appointment (patient-side booking).
-   * - tenantId: req.user.tenantId preferred OR req.body/query fallback (patient flow)
-   * - patientId: from authenticated user
+   * Create appointment (patient-side booking)
+   * POST /api/appointments
+   *
+   * Auth required (PATIENT token)
+   * tenantId:
+   *  - If token includes tenantId (admin booking), use it
+   *  - Else patient must pass tenantId in body/query
    */
   create = async (req, res) => {
     try {
@@ -29,71 +91,65 @@ class AppointmentController {
         });
       }
 
-      // Tenant context:
-      // - If clinic admin token has tenantId, use it.
-      // - If patient token doesn't have tenantId, allow body/query.
+      const role = String(req.user?.role || "").toUpperCase();
+
+      // tenant context rules
       const tokenTenantId = req.user?.tenantId || null;
       const fallbackTenantId = resolveTenantIdForPatient(req);
-      const tenantId = tokenTenantId || fallbackTenantId;
 
+      // Admin must have token tenantId
+      if (role === "CLINIC_ADMIN" && !tokenTenantId) {
+        return res.status(403).json({
+          success: false,
+          message: "Tenant context missing in admin token.",
+        });
+      }
+
+      const tenantId = tokenTenantId || fallbackTenantId;
       if (!tenantId) {
         return res.status(400).json({
           success: false,
-          message: "Medical Facility (Tenant) context is missing.",
+          message: "Medical Facility (tenantId) is required.",
         });
       }
 
       const raw = req.body || {};
 
-      // Normalize patientInfo
-      const incomingPatientInfo =
-        raw.patientInfo && typeof raw.patientInfo === "object"
-          ? raw.patientInfo
-          : null;
-
-      const normalizedPatientInfo = incomingPatientInfo
-        ? {
-            name: normalizeStr(incomingPatientInfo.name),
-            email: normalizeEmail(incomingPatientInfo.email),
-            contact: normalizeStr(
-              incomingPatientInfo.contact || incomingPatientInfo.phone
-            ),
-            symptoms: normalizeStr(incomingPatientInfo.symptoms),
-          }
-        : {
-            name: normalizeStr(raw.patientName || raw.name),
-            email: normalizeEmail(raw.patientEmail || raw.email),
-            contact: normalizeStr(raw.patientContact || raw.contact || raw.phone),
-            symptoms: normalizeStr(raw.symptoms || raw.notes),
-          };
-
-      if (!normalizedPatientInfo.name) {
+      // patient snapshot
+      const { snapshot, error: patientInfoError } = buildPatientInfoSnapshot(raw);
+      if (patientInfoError) {
         return res.status(400).json({
           success: false,
-          message: "Patient name is required.",
-        });
-      }
-      if (!normalizedPatientInfo.contact) {
-        return res.status(400).json({
-          success: false,
-          message: "Patient contact is required.",
+          message: patientInfoError,
         });
       }
 
-      // Support both: dateTime OR (date + slot)
-      const dateTime = raw.dateTime || raw.datetime || null;
+      // doctor id
+      const doctorId = raw.doctorId || raw.doctor;
+      if (!doctorId) {
+        return res.status(400).json({
+          success: false,
+          message: "doctorId is required.",
+        });
+      }
 
-      // ✅ Whitelist fields but keep compatibility
+      // date + slot
+      const { date, slot } = resolveDateSlot(raw);
+      if (!date || !slot) {
+        return res.status(400).json({
+          success: false,
+          message: "date+slot (or valid dateTime) is required.",
+        });
+      }
+
+      // Build service payload (IMPORTANT: patientId from token ONLY)
       const appointmentData = {
-        doctorId: raw.doctorId || raw.doctor,
-        dateTime,                 // preferred by many schemas
-        date: raw.date,           // if your schema uses date/slot
-        slot: raw.slot,
-        consultationFee: resolveFee(raw), // standard name
-        fee: resolveFee(raw),            // backward compatibility
+        doctorId,
+        date,
+        slot,
+        consultationFee: resolveFeeNumber(raw),
         patientId: userId,
-        patientInfo: normalizedPatientInfo,
-        status: raw.status, // optional (service/model can default)
+        patientInfo: snapshot,
       };
 
       const appointment = await AppointmentService.createAppointment(
@@ -103,20 +159,23 @@ class AppointmentController {
 
       return res.status(201).json({
         success: true,
-        message: "Protocol synchronized successfully.",
+        message: "Appointment created successfully.",
         data: appointment,
       });
     } catch (error) {
       console.error("Controller Error (create):", error);
+
+      // Common business errors -> 400
       return res.status(400).json({
         success: false,
-        message: error.message || "Protocol initialization failed.",
+        message: error?.message || "Appointment creation failed.",
       });
     }
   };
 
   /**
    * Admin view: all tenant appointments
+   * GET /api/appointments
    */
   getAll = async (req, res) => {
     try {
@@ -141,15 +200,17 @@ class AppointmentController {
       console.error("Controller Error (getAll):", error);
       return res.status(500).json({
         success: false,
-        message: error.message || "Registry synchronization error.",
+        message: error?.message || "Failed to retrieve tenant appointments.",
       });
     }
   };
 
   /**
    * My appointments:
-   * - CLINIC_ADMIN => all tenant appointments (token tenantId required)
-   * - PATIENT => own appointments (tenantId from query/body allowed)
+   * - CLINIC_ADMIN => tenant appointments (token tenantId required)
+   * - PATIENT => own appointments (tenantId from query/body allowed if token has none)
+   *
+   * GET /api/appointments/my-appointments?tenantId=...
    */
   getMyAppointments = async (req, res) => {
     try {
@@ -165,7 +226,7 @@ class AppointmentController {
         });
       }
 
-      const isAdmin = role === "CLINIC_ADMIN"; // add STAFF here only if your schema supports it
+      const isAdmin = role === "CLINIC_ADMIN";
       const tokenTenantId = req.user?.tenantId || null;
       const fallbackTenantId = resolveTenantIdForPatient(req);
       const tenantId = isAdmin ? tokenTenantId : (tokenTenantId || fallbackTenantId);
@@ -175,7 +236,7 @@ class AppointmentController {
           success: false,
           message: isAdmin
             ? "Tenant context missing in token."
-            : "Tenant context missing. Pass tenantId in query (?tenantId=...).",
+            : "tenantId missing. Pass it in query (?tenantId=...) or body.",
         });
       }
 
@@ -191,13 +252,14 @@ class AppointmentController {
       console.error("Controller Error (getMyAppointments):", error);
       return res.status(500).json({
         success: false,
-        message: error.message || "Failed to retrieve appointments.",
+        message: error?.message || "Failed to retrieve appointments.",
       });
     }
   };
 
   /**
    * Update status (tenant secured)
+   * PATCH /api/appointments/:id/status
    */
   updateStatus = async (req, res) => {
     try {
@@ -212,10 +274,17 @@ class AppointmentController {
         });
       }
 
-      if (!id || !status) {
+      if (!id) {
         return res.status(400).json({
           success: false,
-          message: "Appointment ID and status are required.",
+          message: "Appointment ID is required.",
+        });
+      }
+
+      if (!status) {
+        return res.status(400).json({
+          success: false,
+          message: "Status is required.",
         });
       }
 
@@ -234,7 +303,7 @@ class AppointmentController {
       console.error("Controller Error (updateStatus):", error);
       return res.status(400).json({
         success: false,
-        message: error.message || "Status transition failed.",
+        message: error?.message || "Status update failed.",
       });
     }
   };

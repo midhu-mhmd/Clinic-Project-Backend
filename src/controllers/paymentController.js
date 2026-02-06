@@ -1,3 +1,5 @@
+import jwt from "jsonwebtoken";
+import User from "../models/userModel.js";
 import {
   createRazorpayOrderService,
   confirmRazorpayPaymentService,
@@ -15,15 +17,19 @@ const normalizePlanCode = (v) => String(v || "").trim().toUpperCase();
 const normalizeCycle = (v) => String(v || "monthly").trim().toLowerCase();
 
 const ALLOWED_PLANS = new Set(["PRO", "ENTERPRISE", "PROFESSIONAL"]);
-const ALLOWED_CYCLES = new Set(["monthly", "yearly"]);
 
-const getTenantIdOrNull = (req) => req.user?.tenantId || req.body?.tenantId || null;
-const getUserIdOrNull = (req) => req.user?.id || req.user?._id || null;
+const getTenantIdOrNull = (req) => {
+  const id = req.user?.tenantId || req.body?.tenantId || null;
+  return id ? String(id) : null;
+};
+
+const getUserIdOrNull = (req) => {
+  const id = req.user?.id || req.user?._id || null;
+  return id ? String(id) : null;
+};
 
 const getEmailOrNull = (req) => {
-  const email = String(req.user?.email || req.body?.email || "")
-    .trim()
-    .toLowerCase();
+  const email = String(req.user?.email || req.body?.email || "").trim().toLowerCase();
   return email || null;
 };
 
@@ -35,9 +41,6 @@ const toSafeLimit = (v, def = 20) => {
 
 /* =========================================================
    ✅ CREATE ORDER (Razorpay)
-   POST /api/payments/create-order
-   Body: { planCode, billingCycle }
-   Requires: protect + authorize(CLINIC_ADMIN)
 ========================================================= */
 export const createOrder = catchAsync(async (req, res) => {
   const tenantId = getTenantIdOrNull(req);
@@ -47,7 +50,7 @@ export const createOrder = catchAsync(async (req, res) => {
   if (!tenantId || !email) {
     return res.status(401).json({
       success: false,
-      message: "Auth context missing. Please login again.",
+      message: "Authentication context missing. Please login again.",
     });
   }
 
@@ -57,18 +60,10 @@ export const createOrder = catchAsync(async (req, res) => {
   if (!ALLOWED_PLANS.has(planCode)) {
     return res.status(400).json({
       success: false,
-      message: "Invalid planCode. Allowed: PRO, ENTERPRISE, PROFESSIONAL.",
+      message: "Invalid plan code selected.",
     });
   }
 
-  if (!ALLOWED_CYCLES.has(billingCycle)) {
-    return res.status(400).json({
-      success: false,
-      message: "Invalid billingCycle. Allowed: monthly, yearly.",
-    });
-  }
-
-  // service will throw if env is missing; catchAsync will pass to error handler
   const result = await createRazorpayOrderService({
     tenantId,
     userId,
@@ -77,14 +72,6 @@ export const createOrder = catchAsync(async (req, res) => {
     billingCycle,
     currency: "INR",
   });
-
-  const keyId = process.env.RAZORPAY_KEY_ID;
-  if (!keyId) {
-    return res.status(500).json({
-      success: false,
-      message: "Razorpay key missing in server env.",
-    });
-  }
 
   return res.status(200).json({
     success: true,
@@ -96,23 +83,20 @@ export const createOrder = catchAsync(async (req, res) => {
       currency: result.currency,
       planCode: result.planCode,
       billingCycle: result.billingCycle,
-      keyId, // required for frontend Razorpay checkout
+      keyId: process.env.RAZORPAY_KEY_ID,
     },
   });
 });
 
 /* =========================================================
    ✅ VERIFY + ACTIVATE SUBSCRIPTION
-   POST /api/payments/verify
-   Body: { razorpay_order_id, razorpay_payment_id, razorpay_signature }
-   Requires: protect + authorize(CLINIC_ADMIN)
 ========================================================= */
 export const verifyOrder = catchAsync(async (req, res) => {
   const tenantId = getTenantIdOrNull(req);
   if (!tenantId) {
     return res.status(401).json({
       success: false,
-      message: "Auth context missing. Please login again.",
+      message: "Session context missing. Please restart the process.",
     });
   }
 
@@ -121,36 +105,63 @@ export const verifyOrder = catchAsync(async (req, res) => {
   if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
     return res.status(400).json({
       success: false,
-      message: "Missing Razorpay verification fields.",
+      message: "Payment verification data missing.",
     });
   }
 
+  // 1. Service Call to finalize DB entry
   const result = await confirmRazorpayPaymentService({
     razorpayOrderId: razorpay_order_id,
     razorpayPaymentId: razorpay_payment_id,
     razorpaySignature: razorpay_signature,
   });
 
-  // ✅ SECURITY: ensure payment belongs to this tenant
-  if (String(result.tenantId) !== String(tenantId)) {
+  // 2. Tenant matching validation
+  if (String(result.tenantId) !== tenantId) {
     return res.status(403).json({
       success: false,
-      message: "Payment does not belong to this tenant.",
+      message: "Security mismatch: Payment record does not match current tenant.",
     });
   }
 
+  // 3. Upgrade User to "AUTH" status
+  // We find the user and explicitly convert IDs to strings for the JWT payload
+  const user = await User.findOne({ tenantId: result.tenantId }).sort({ createdAt: 1 });
+  
+  if (!user) {
+    return res.status(404).json({ success: false, message: "Administrative user not found." });
+  }
+
+  // 4. Generate the FULL ACCESS token
+  const authToken = jwt.sign(
+    {
+      id: String(user._id),
+      tenantId: String(user.tenantId),
+      role: user.role,
+      purpose: "AUTH", // THIS IS THE GATE PASS for 'protect' middleware
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+
+  // 5. Audit update
+  user.lastActive = new Date();
+  await user.save({ validateBeforeSave: false });
+
   return res.status(200).json({
     success: true,
-    message: "Payment verified and subscription activated.",
-    data: result,
+    message: "Subscription activated. Access granted.",
+    token: authToken, // Frontend MUST replace the old token with this
+    role: user.role,
+    data: {
+      plan: result.planCode,
+      status: "ACTIVE"
+    },
   });
 });
 
 /* =========================================================
    ✅ MANUAL PAYMENT SUBMISSION
-   POST /api/payments/manual
-   Body: { planCode, transactionRef, billingCycle?, amountRupees? }
-   Requires: protect + authorize(CLINIC_ADMIN)
 ========================================================= */
 export const submitManualPayment = catchAsync(async (req, res) => {
   const tenantId = getTenantIdOrNull(req);
@@ -158,76 +169,35 @@ export const submitManualPayment = catchAsync(async (req, res) => {
   const email = getEmailOrNull(req);
 
   if (!tenantId || !email) {
-    return res.status(401).json({
-      success: false,
-      message: "Auth context missing. Please login again.",
-    });
-  }
-
-  const transactionRef = String(req.body?.transactionRef || "").trim();
-  const planCode = normalizePlanCode(req.body?.planCode || req.body?.plan);
-  const billingCycle = normalizeCycle(req.body?.billingCycle || "monthly");
-  const amountRupees = Number(req.body?.amountRupees || 0);
-
-  if (!transactionRef) {
-    return res.status(400).json({
-      success: false,
-      message: "Transaction Reference (UTR) is required.",
-    });
-  }
-
-  if (!ALLOWED_PLANS.has(planCode)) {
-    return res.status(400).json({
-      success: false,
-      message: "Invalid planCode. Allowed: PRO, ENTERPRISE, PROFESSIONAL.",
-    });
-  }
-
-  if (!ALLOWED_CYCLES.has(billingCycle)) {
-    return res.status(400).json({
-      success: false,
-      message: "Invalid billingCycle. Allowed: monthly, yearly.",
-    });
+    return res.status(401).json({ success: false, message: "Context missing." });
   }
 
   const result = await submitManualPaymentService({
     tenantId,
     userId,
     email,
-    planCode,
-    billingCycle,
-    transactionRef,
-    amountRupees,
+    planCode: normalizePlanCode(req.body.planCode),
+    billingCycle: normalizeCycle(req.body.billingCycle),
+    transactionRef: req.body.transactionRef,
+    amountRupees: req.body.amountRupees,
   });
 
   return res.status(201).json({
     success: true,
-    message: "Manual payment submitted for verification.",
+    message: "Protocol submitted for manual review.",
     data: result,
   });
 });
 
 /* =========================================================
-   ✅ INVOICES (for Billing UI)
-   GET /api/payments/invoices?limit=20
-   Requires: protect + authorize(CLINIC_ADMIN)
+   ✅ INVOICES
 ========================================================= */
 export const getInvoices = catchAsync(async (req, res) => {
   const tenantId = getTenantIdOrNull(req);
-
-  if (!tenantId) {
-    return res.status(401).json({
-      success: false,
-      message: "Auth context missing. Please login again.",
-    });
-  }
+  if (!tenantId) return res.status(401).json({ success: false, message: "Access denied." });
 
   const limit = toSafeLimit(req.query?.limit, 20);
   const data = await listTenantInvoicesService(tenantId, { limit });
 
-  return res.status(200).json({
-    success: true,
-    message: "Invoices fetched.",
-    data,
-  });
+  return res.status(200).json({ success: true, data });
 });

@@ -83,3 +83,50 @@ export const welcomeEmailTemplate = (userName, loginLink) => `
 </body>
 </html>
 `;
+export const doctorInvitationTemplate = (doctorName, specialization, loginLink) => `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;700&display=swap');
+    body { margin: 0; padding: 0; background-color: #ffffff; font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
+    .main { width: 100%; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; }
+    .header { padding: 40px; border-bottom: 1px solid #f3f4f6; }
+    .brand { font-size: 11px; letter-spacing: 4px; text-transform: uppercase; color: #1a1a1a; font-weight: 700; }
+    .content { padding: 80px 40px; }
+    .faculty-tag { font-size: 9px; color: #8DAA9D; letter-spacing: 2px; text-transform: uppercase; font-weight: 700; margin-bottom: 15px; display: block; }
+    h1 { font-size: 44px; font-weight: 300; letter-spacing: -2px; line-height: 1.1; margin: 0; color: #1a1a1a; }
+    h1 b { font-family: serif; font-style: italic; font-weight: 400; color: #8DAA9D; }
+    p { font-size: 15px; color: #4b5563; line-height: 1.8; margin: 30px 0; }
+    .role-box { background-color: #f9fafb; padding: 20px; border-left: 2px solid #1a1a1a; margin: 40px 0; }
+    .role-label { font-size: 9px; color: #9ca3af; text-transform: uppercase; letter-spacing: 1px; }
+    .role-value { font-size: 16px; font-weight: 700; color: #1a1a1a; margin-top: 5px; }
+    .cta-button { display: inline-block; background-color: #1a1a1a; color: #ffffff !important; padding: 20px 40px; text-decoration: none; font-size: 11px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; }
+    .footer { padding: 40px; border-top: 1px solid #f3f4f6; font-size: 9px; color: #9ca3af; letter-spacing: 1px; text-transform: uppercase; }
+  </style>
+</head>
+<body>
+  <div class="main">
+    <div class="header">
+      <div class="brand">SOVEREIGN</div>
+    </div>
+    <div class="content">
+      <span class="faculty-tag">Faculty Appointment</span>
+      <h1>Welcome to the <b>Clinical</b> Collective.</h1>
+      <p>Dr. ${doctorName.split(' ')[0]}, your credentials have been verified. You are now synthesized with the Sovereign medical network as a specialist in your field.</p>
+      
+      <div class="role-box">
+        <div class="role-label">Designated Specialization</div>
+        <div class="role-value">${specialization}</div>
+      </div>
+
+      <a href="${loginLink}" class="cta-button">Access Faculty Portal &rarr;</a>
+    </div>
+    <div class="footer">
+      SOVEREIGN HEALTHBOOK / PRECISION CARE FACULTY DIVISION — 2026
+    </div>
+  </div>
+</body>
+</html>
+`;

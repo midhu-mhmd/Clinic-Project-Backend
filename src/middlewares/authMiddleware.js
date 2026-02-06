@@ -6,13 +6,12 @@ import User from "../models/userModel.js";
 ========================================================= */
 const getBearerToken = (req) => {
   const authHeader = req.headers.authorization || req.headers.Authorization || "";
-  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
+  if (!authHeader?.startsWith("Bearer ")) return null;
 
   const parts = authHeader.split(" ");
   if (parts.length !== 2) return null;
 
   const token = parts[1];
-  // Filter out common frontend "empty" strings
   if (!token || ["null", "undefined", "[object Object]"].includes(token)) return null;
 
   return token;
@@ -26,44 +25,91 @@ const jwtErrorMessage = (err) => {
   return "Authentication failed.";
 };
 
+const normalizeRole = (v) => String(v || "").trim().toUpperCase();
+
 /* =========================================================
-   ✅ AUTH PROTECT (Full Access)
-   - Requires purpose: "AUTH"
+   ✅ BASE VERIFY
+   - Verifies token
+   - Attaches req.user from DB
+   - Does NOT enforce purpose
+========================================================= */
+const verifyAndAttachUser = async (req) => {
+  if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET missing");
+
+  const token = getBearerToken(req);
+  if (!token) {
+    const e = new Error("No token provided.");
+    e.statusCode = 401;
+    throw e;
+  }
+
+  const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+  const user = await User.findById(decoded.id).select("-password").lean();
+  if (!user) {
+    const e = new Error("User no longer exists.");
+    e.statusCode = 401;
+    throw e;
+  }
+
+  req.user = {
+    ...user,
+    id: String(user._id),
+    role: normalizeRole(user.role || decoded.role),
+    tenantId: user.tenantId
+      ? String(user.tenantId)
+      : decoded.tenantId
+        ? String(decoded.tenantId)
+        : null,
+    tokenPurpose: decoded.purpose || null,
+  };
+
+  return decoded;
+};
+
+/* =========================================================
+   ✅ PROTECT (Flexible)
+   - Used for: Patient booking, patient views, general auth routes
+   - Accepts tokens even if purpose is missing
 ========================================================= */
 export const protect = async (req, res, next) => {
   try {
-    if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET missing");
-
-    const token = getBearerToken(req);
-    if (!token) return res.status(401).json({ success: false, message: "No token provided." });
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    // 🛡️ SECURITY GATE: Only allow full AUTH tokens
-    if (decoded.purpose !== "AUTH") {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Access denied. Please complete payment and login again." 
-      });
-    }
-
-    const user = await User.findById(decoded.id).select("-password").lean();
-    if (!user) return res.status(401).json({ success: false, message: "User no longer exists." });
-
-    req.user = {
-      ...user,
-      id: String(user._id),
-      tenantId: user.tenantId ? String(user.tenantId) : (decoded.tenantId ? String(decoded.tenantId) : null),
-    };
-
+    await verifyAndAttachUser(req);
     next();
   } catch (err) {
-    return res.status(401).json({ success: false, message: jwtErrorMessage(err) });
+    return res
+      .status(err.statusCode || 401)
+      .json({ success: false, message: err.message || jwtErrorMessage(err) });
   }
 };
 
 /* =========================================================
-   ✅ PAYMENT PROTECT (Restricted Access)
+   ✅ PROTECT AUTH (Strict)
+   - Used for: Dashboard/Admin secured routes
+   - Requires purpose === "AUTH"
+========================================================= */
+export const protectAuth = async (req, res, next) => {
+  try {
+    const decoded = await verifyAndAttachUser(req);
+
+    if (decoded.purpose !== "AUTH") {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied. Please complete payment and login again.",
+      });
+    }
+
+    next();
+  } catch (err) {
+    return res
+      .status(err.statusCode || 401)
+      .json({ success: false, message: err.message || jwtErrorMessage(err) });
+  }
+};
+
+/* =========================================================
+   ✅ PAYMENT PROTECT
+   - Used for: /create-order, /verify, /manual
    - Allows purpose: "PAYMENT" or "AUTH"
 ========================================================= */
 export const protectPayment = async (req, res, next) => {
@@ -75,19 +121,37 @@ export const protectPayment = async (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // 🛡️ SECURITY GATE: Allow Payment OR Auth (in case an active user is renewing/upgrading)
     if (!["PAYMENT", "AUTH"].includes(decoded.purpose)) {
-      return res.status(403).json({ success: false, message: "Invalid token for payment activation." });
+      return res.status(403).json({
+        success: false,
+        message: "Invalid token for payment activation.",
+      });
     }
 
-    const user = await User.findById(decoded.id).select("-password").lean();
-    if (!user) return res.status(401).json({ success: false, message: "User no longer exists." });
+    const user = await User.findOne({
+      $or: [{ _id: decoded.id }, { email: decoded.email }],
+    })
+      .select("-password")
+      .lean();
 
-    req.user = {
-      ...user,
-      id: String(user._id),
-      tenantId: user.tenantId ? String(user.tenantId) : (decoded.tenantId ? String(decoded.tenantId) : null),
-    };
+    req.user = user
+      ? {
+          ...user,
+          id: String(user._id),
+          role: normalizeRole(user.role || decoded.role),
+          tenantId: user.tenantId
+            ? String(user.tenantId)
+            : decoded.tenantId
+              ? String(decoded.tenantId)
+              : null,
+          tokenPurpose: decoded.purpose || null,
+        }
+      : {
+          email: decoded.email,
+          tenantId: decoded.tenantId || null,
+          role: normalizeRole(decoded.role || "CLINIC_ADMIN"),
+          tokenPurpose: decoded.purpose || null,
+        };
 
     next();
   } catch (err) {
@@ -99,8 +163,10 @@ export const protectPayment = async (req, res, next) => {
    ✅ AUTHORIZATION
 ========================================================= */
 export const restrictTo = (...roles) => {
+  const allowed = roles.map((r) => normalizeRole(r));
   return (req, res, next) => {
-    if (!req.user || !roles.includes(req.user.role)) {
+    const role = normalizeRole(req.user?.role);
+    if (!req.user || !allowed.includes(role)) {
       return res.status(403).json({
         success: false,
         message: "Access Denied: Required permissions missing.",

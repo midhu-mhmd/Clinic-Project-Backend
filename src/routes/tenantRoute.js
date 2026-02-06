@@ -23,9 +23,7 @@ import { protect, authorize, protectPayment } from "../middlewares/authMiddlewar
 
 const router = express.Router();
 
-/* =========================================================
-   1. PUBLIC AUTH (Clinic Registration & Security)
-========================================================= */
+
 router.post("/register", createTenant);
 router.post("/login", loginTenant);
 router.post("/verify-otp", verifyEmailOTP);
@@ -33,20 +31,15 @@ router.post("/resend-otp", resendOTP);
 router.post("/forgot-password", forgotPasswordClinic);
 router.post("/reset-password", resetPasswordClinic);
 
-/* =========================================================
-   2. PUBLIC DIRECTORY & PROFILE (Patient Facing)
-   - These must be BEFORE the protect middleware
-========================================================= */
-router.get("/all", getDirectory);
-router.get("/doctors/public/:clinicId", getClinicDoctorsPublic);
 
-// ✅ MOVED: Clinic Profile is now public
-// Place it before the auth shield so patients can view clinic details
-router.get("/:id", getClinicById); 
+router.get("/stats", protect, authorize("CLINIC_ADMIN"), getStats);
+router.get("/profile", protect, authorize("CLINIC_ADMIN"), getProfile);
+router.patch("/profile", protect, authorize("CLINIC_ADMIN"), updateProfile);
+router.put("/change-password", protect, authorize("CLINIC_ADMIN"), changePassword);
+router.post("/upload-image", protect, authorize("CLINIC_ADMIN"), upload.single("image"), uploadImage);
 
 /* =========================================================
-   3. PAYMENT FLOW (Temporary Payment Token)
-   - Used after OTP verify but before final subscription activation
+   3. PAYMENT FLOW
 ========================================================= */
 router.post(
   "/subscription/activate", 
@@ -56,16 +49,13 @@ router.post(
 );
 
 /* =========================================================
-   4. PROTECTED ROUTES (Dashboard & Settings)
-   - Requires full AUTH token and CLINIC_ADMIN role
+   4. PUBLIC DIRECTORY & PROFILE (Patient Facing)
 ========================================================= */
+router.get("/all", getDirectory);
+router.get("/doctors/public/:clinicId", getClinicDoctorsPublic);
 
-router.use(protect, authorize("CLINIC_ADMIN"));
-
-router.get("/stats", getStats);
-router.get("/profile", getProfile);
-router.patch("/profile", updateProfile);
-router.put("/change-password", changePassword);
-router.post("/upload-image", upload.single("image"), uploadImage);
+// ✅ FIXED: Move this to the bottom. 
+// If it stays at the top, it treats "profile" or "stats" as an ID.
+router.get("/:id", getClinicById); 
 
 export default router;
