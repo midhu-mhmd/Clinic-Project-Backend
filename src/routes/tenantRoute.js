@@ -1,4 +1,5 @@
 import express from "express";
+import mongoose from "mongoose";
 import upload from "../middlewares/uploadMiddleware.js";
 
 import {
@@ -23,7 +24,18 @@ import { protect, authorize, protectPayment } from "../middlewares/authMiddlewar
 
 const router = express.Router();
 
+// ✅ Helper: Prevent Crashing on Bad IDs
+// If the ID isn't a valid Mongo ID, return 404 immediately instead of crashing the DB.
+const validateId = (req, res, next) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return res.status(404).json({ success: false, message: "Resource not found or invalid ID." });
+  }
+  next();
+};
 
+/* =========================================================
+   1. AUTH & ACCOUNT ROUTES (Static Paths First)
+========================================================= */
 router.post("/register", createTenant);
 router.post("/login", loginTenant);
 router.post("/verify-otp", verifyEmailOTP);
@@ -31,7 +43,9 @@ router.post("/resend-otp", resendOTP);
 router.post("/forgot-password", forgotPasswordClinic);
 router.post("/reset-password", resetPasswordClinic);
 
-
+/* =========================================================
+   2. PROTECTED ADMIN ROUTES
+========================================================= */
 router.get("/stats", protect, authorize("CLINIC_ADMIN"), getStats);
 router.get("/profile", protect, authorize("CLINIC_ADMIN"), getProfile);
 router.patch("/profile", protect, authorize("CLINIC_ADMIN"), updateProfile);
@@ -49,13 +63,17 @@ router.post(
 );
 
 /* =========================================================
-   4. PUBLIC DIRECTORY & PROFILE (Patient Facing)
+   4. PUBLIC DIRECTORY & PROFILE
 ========================================================= */
 router.get("/all", getDirectory);
+
+// This is specific, so it goes ABOVE the generic /:id
 router.get("/doctors/public/:clinicId", getClinicDoctorsPublic);
 
-// ✅ FIXED: Move this to the bottom. 
-// If it stays at the top, it treats "profile" or "stats" as an ID.
-router.get("/:id", getClinicById); 
+/* =========================================================
+   5. DYNAMIC ROUTES (MUST BE LAST)
+========================================================= */
+// ✅ FIXED: Added validateId to stop "register" or "favicon" from crashing Mongoose
+router.get("/:id", validateId, getClinicById); 
 
 export default router;

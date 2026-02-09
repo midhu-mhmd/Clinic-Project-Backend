@@ -1,7 +1,6 @@
 import mongoose from "mongoose";
 import doctorService, { AppError } from "../services/doctorService.js";
 import { uploadToCloudinary, deleteFromCloudinary } from "../utils/cloudinaryUpload.js";
-// ✅ Essential Email Imports
 import { sendEmail } from "../utils/emailService.js";
 import { doctorInvitationTemplate } from "../utils/emailTemplates.js";
 
@@ -40,25 +39,17 @@ export const createDoctor = async (req, res) => {
 
   try {
     const tenantId = req.user?.tenantId;
-    if (!tenantId) {
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized: tenant context missing.",
-      });
-    }
+    if (!tenantId) throw new AppError("Unauthorized: tenant context missing.", 401);
 
     let imageUrl = "";
     let imagePublicId = "";
 
-    // 1. Image Processing
     if (req.file) {
       uploadedAsset = await uploadToCloudinary(req.file.buffer, "doctors");
       imageUrl = uploadedAsset.url;
       imagePublicId = uploadedAsset.publicId;
     }
 
-    // 2. Database Creation
-    // The service now returns { doctor, tenantName }
     const { doctor, tenantName } = await doctorService.createDoctor(
       tenantId,
       req.body,
@@ -66,9 +57,6 @@ export const createDoctor = async (req, res) => {
       imagePublicId
     );
 
-    // 3. ✅ DISPATCH WELCOME EMAIL
-    // Wrapped in its own try/catch to ensure the API response finishes 
-    // even if the email server has a hiccup.
     try {
       const loginLink = `${process.env.CLIENT_URL}/clinic-login`;
       const emailHtml = doctorInvitationTemplate(
@@ -83,8 +71,7 @@ export const createDoctor = async (req, res) => {
         html: emailHtml,
       });
     } catch (emailErr) {
-      console.error("Welcome Email Failed to Send:", emailErr.message);
-      // We don't throw here; the doctor is already created.
+      console.error("Welcome Email Failed:", emailErr.message);
     }
 
     return res.status(201).json({
@@ -94,47 +81,57 @@ export const createDoctor = async (req, res) => {
     });
 
   } catch (err) {
-    // Cleanup Cloudinary if the DB step failed
     if (uploadedAsset?.publicId) {
-      await deleteFromCloudinary(uploadedAsset.publicId).catch((e) => 
-        console.error("Cleanup Error:", e.message)
-      );
+      await deleteFromCloudinary(uploadedAsset.publicId).catch(() => {});
     }
     return sendError(res, err, "Failed to create practitioner.");
   }
 };
 
 /**
- * FETCH BY CLINIC ID (PUBLIC)
- */
-export const getDoctorsByClinic = async (req, res) => {
-  try {
-    const { clinicId } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(clinicId)) {
-      return res.status(400).json({ success: false, message: "Invalid Facility ID." });
-    }
-
-    const doctors = await doctorService.getDoctorsByClinicPublic(clinicId);
-    return res.status(200).json({ success: true, count: doctors.length, data: doctors });
-  } catch (err) {
-    return sendError(res, err, "Failed to fetch specialists.");
-  }
-};
-
-/**
- * PUBLIC DIRECTORY (ALL CLINICS)
+ * ✅ PUBLIC DIRECTORY (Global Search)
  */
 export const getPublicDoctorDirectory = async (req, res) => {
   try {
     const doctors = await doctorService.getAllDoctorsPublic();
-    return res.status(200).json({ success: true, count: doctors.length, data: doctors });
+    return res.status(200).json({ 
+      success: true, 
+      count: doctors.length, 
+      data: doctors 
+    });
   } catch (err) {
     return sendError(res, err, "Failed to fetch directory.");
   }
 };
 
 /**
- * GET SINGLE DOCTOR (ADMIN OR PUBLIC)
+ * ✅ PUBLIC: FETCH BY CLINIC ID
+ */
+export const getDoctorsByClinic = async (req, res) => {
+  try {
+    const { clinicId } = req.params;
+    const doctors = await doctorService.getDoctorsByClinicPublic(clinicId);
+    return res.status(200).json({ success: true, count: doctors.length, data: doctors });
+  } catch (err) {
+    return sendError(res, err, "Failed to fetch facility specialists.");
+  }
+};
+
+/**
+ * ✅ PUBLIC: SINGLE DOCTOR PROFILE
+ */
+export const getDoctorByIdPublic = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const doctor = await doctorService.getDoctorByIdPublic(id);
+    return res.status(200).json({ success: true, data: doctor });
+  } catch (err) {
+    return sendError(res, err, "Failed to retrieve public profile.");
+  }
+};
+
+/**
+ * ✅ ADMIN: GET SINGLE DOCTOR (The missing piece that caused the crash)
  */
 export const getDoctorById = async (req, res) => {
   try {
@@ -145,23 +142,20 @@ export const getDoctorById = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid ID format." });
     }
 
-    const doctor = tenantId
-      ? await doctorService.getDoctorById(tenantId, id)
-      : await doctorService.getDoctorByIdPublic(id);
-
+    const doctor = await doctorService.getDoctorById(tenantId, id);
     return res.status(200).json({ success: true, data: doctor });
   } catch (err) {
-    return sendError(res, err, "Failed to retrieve profile.");
+    return sendError(res, err, "Failed to retrieve practitioner data.");
   }
 };
 
 /**
- * GET ALL (TENANT ADMIN VIEW)
+ * ✅ ADMIN: GET ALL (Dashboard View)
  */
 export const getAllDoctors = async (req, res) => {
   try {
     const tenantId = req.user?.tenantId;
-    if (!tenantId) throw new AppError("Unauthorized.", 401);
+    if (!tenantId) throw new AppError("Unauthorized access.", 401);
 
     const doctors = await doctorService.getDoctors(tenantId);
     return res.status(200).json({ success: true, count: doctors.length, data: doctors });
@@ -171,7 +165,7 @@ export const getAllDoctors = async (req, res) => {
 };
 
 /**
- * UPDATE DOCTOR
+ * ✅ ADMIN: UPDATE DOCTOR
  */
 export const updateDoctor = async (req, res) => {
   let newUpload = null;
@@ -192,8 +186,8 @@ export const updateDoctor = async (req, res) => {
       updateData.imagePublicId = newUpload.publicId;
     }
 
-    const updatedDoctor = await doctorService.updateDoctor(tenantId, id, updateData);
-    return res.status(200).json({ success: true, message: "Practitioner updated.", data: updatedDoctor });
+    const updated = await doctorService.updateDoctor(tenantId, id, updateData);
+    return res.status(200).json({ success: true, message: "Practitioner updated.", data: updated });
   } catch (err) {
     if (newUpload?.publicId) await deleteFromCloudinary(newUpload.publicId).catch(() => {});
     return sendError(res, err, "Failed to update practitioner.");
@@ -201,7 +195,7 @@ export const updateDoctor = async (req, res) => {
 };
 
 /**
- * DELETE DOCTOR (SOFT DELETE)
+ * ✅ ADMIN: ARCHIVE DOCTOR (SOFT DELETE)
  */
 export const deleteDoctor = async (req, res) => {
   try {
@@ -213,36 +207,10 @@ export const deleteDoctor = async (req, res) => {
     if (doctor?.imagePublicId) {
       await deleteFromCloudinary(doctor.imagePublicId).catch(() => {});
     }
-    await doctorService.softDeleteDoctor(tenantId, id);
 
+    await doctorService.softDeleteDoctor(tenantId, id);
     return res.status(200).json({ success: true, message: "Practitioner archived." });
   } catch (err) {
     return sendError(res, err, "Failed to archive practitioner.");
-  }
-};
-/**
- * GET SINGLE DOCTOR (EXPLICIT PUBLIC)
- * Dedicated endpoint for patient-facing profile pages.
- */
-export const getDoctorByIdPublic = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid Practitioner ID format.",
-      });
-    }
-
-    // Directly calls the public service method
-    const doctor = await doctorService.getDoctorByIdPublic(id);
-
-    return res.status(200).json({
-      success: true,
-      data: doctor,
-    });
-  } catch (err) {
-    return sendError(res, err, "Failed to retrieve public practitioner profile.");
   }
 };

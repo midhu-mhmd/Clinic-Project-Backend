@@ -18,7 +18,7 @@ class AppError extends Error {
  */
 const getPlanLimit = (plan) => {
   const p = String(plan || "").toUpperCase();
-  if (p === "FREE") return 1; 
+  if (p === "FREE") return 1;
   if (p === "PRO") return 3;
   if (p === "ENTERPRISE") return 10;
   if (p === "PROFESSIONAL" || p === "UNLIMITED") return Infinity;
@@ -33,14 +33,13 @@ const normalizeDoctorData = (doctorData = {}) => {
 
   if (data.email) data.email = String(data.email).trim().toLowerCase();
   if (data.name) data.name = String(data.name).trim();
-  
-  // Sovereign Aesthetic: Ensure specialization is Title Cased
+
   if (data.specialization) {
     data.specialization = String(data.specialization)
       .trim()
-      .split(' ')
-      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-      .join(' ');
+      .split(" ")
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(" ");
   }
 
   if (data.experience !== undefined) {
@@ -58,54 +57,36 @@ const normalizeDoctorData = (doctorData = {}) => {
 
 class DoctorService {
   /**
-   * ✅ PLAN CHECK
+   * ✅ SaaS PROTOCOL: PLAN CHECK
    */
   async assertTenantCanAddDoctor(tenantId) {
     if (!mongoose.Types.ObjectId.isValid(tenantId)) {
       throw new AppError("Invalid tenant identity.", 400, "INVALID_TENANT");
     }
 
-    const tenant = await Tenant.findById(tenantId)
-      .select("subscription.plan subscription.status name")
-      .lean();
+    const tenant = await Tenant.findById(tenantId).select("subscription.plan subscription.status name").lean();
 
-    if (!tenant) {
-      throw new AppError("Clinic profile not found.", 404, "TENANT_NOT_FOUND");
-    }
+    if (!tenant) throw new AppError("Clinic profile not found.", 404, "TENANT_NOT_FOUND");
 
     const status = String(tenant.subscription?.status || "").toUpperCase();
     if (status !== "ACTIVE") {
-      throw new AppError(
-        "Subscription inactive. Please renew your Sovereign Protocol access.",
-        403,
-        "SUBSCRIPTION_INACTIVE"
-      );
+      throw new AppError("Subscription inactive. Protocol access denied.", 403, "SUBSCRIPTION_INACTIVE");
     }
 
     const plan = String(tenant.subscription?.plan || "").toUpperCase();
     const limit = getPlanLimit(plan);
 
-    if (limit === Infinity) return { plan, limit, tenantName: tenant.name };
+    const currentCount = await Doctor.countDocuments({ tenantId, isDeleted: { $ne: true } });
 
-    // Important: Only count non-deleted doctors towards the limit
-    const currentCount = await Doctor.countDocuments({
-      tenantId,
-      isDeleted: { $ne: true },
-    });
-
-    if (currentCount >= limit) {
-      throw new AppError(
-        `Faculty limit reached for ${plan} tier. (Max: ${limit})`,
-        403,
-        "DOCTOR_LIMIT_REACHED"
-      );
+    if (limit !== Infinity && currentCount >= limit) {
+      throw new AppError(`Faculty limit reached for ${plan} tier.`, 403, "DOCTOR_LIMIT_REACHED");
     }
 
-    return { plan, limit, currentCount, tenantName: tenant.name };
+    return { plan, limit, tenantName: tenant.name };
   }
 
   /**
-   * ✅ CREATE DOCTOR
+   * ✅ CREATE RECORD
    */
   async createDoctor(tenantId, doctorData, imageUrl = "", imagePublicId = "") {
     const tenantInfo = await this.assertTenantCanAddDoctor(tenantId);
@@ -117,128 +98,89 @@ class DoctorService {
         tenantId,
         image: imageUrl,
         imagePublicId,
-        isActive: true, // Defaulting to true for new records
+        isActive: true,
       });
-
-      // NOTE: We return the doctor. 
-      // The Controller should handle the email trigger via welcomeEmailTemplate
       return { doctor, tenantName: tenantInfo.tenantName };
-      
     } catch (err) {
-      if (err?.code === 11000) {
-        throw new AppError(
-          "This email is already registered within this clinical protocol.",
-          409,
-          "DUPLICATE_DOCTOR_EMAIL"
-        );
-      }
+      if (err?.code === 11000) throw new AppError("Email already exists in protocol.", 409, "DUPLICATE_EMAIL");
       throw err;
     }
   }
 
   /**
-   * ✅ READ: Tenant Admin View (Dashboard)
+   * ✅ PUBLIC: Global Directory (Fixes Controller Crash)
    */
-  async getDoctors(tenantId) {
-    if (!mongoose.Types.ObjectId.isValid(tenantId)) {
-      throw new AppError("Invalid tenantId.", 400, "INVALID_TENANT");
-    }
-
-    // Filter by isDeleted: { $ne: true } to keep the list clean
-    return Doctor.find({ tenantId, isDeleted: { $ne: true } })
-      .select(
-        "name email specialization consultationFee education experience status availability image isActive createdAt updatedAt"
-      )
+  async getAllDoctorsPublic() {
+    return Doctor.find({ isDeleted: { $ne: true }, isActive: true })
+      .select("name specialization consultationFee experience rating image availability")
+      .populate("tenantId", "name slug") // Shows which clinic they belong to
       .sort({ createdAt: -1 })
       .lean();
   }
 
   /**
-   * ✅ READ: Single Doctor (Admin View)
+   * ✅ PUBLIC: Specific Clinic Directory
    */
-  async getDoctorById(tenantId, doctorId) {
-    if (!mongoose.Types.ObjectId.isValid(tenantId) || !mongoose.Types.ObjectId.isValid(doctorId)) {
-      throw new AppError("Required IDs missing.", 400, "INVALID_ID");
-    }
-
-    const doctor = await Doctor.findOne({ _id: doctorId, tenantId, isDeleted: { $ne: true } })
-      .select(
-        "name email specialization consultationFee education experience status availability image isActive createdAt updatedAt"
-      )
+  async getDoctorsByClinicPublic(tenantId) {
+    if (!mongoose.Types.ObjectId.isValid(tenantId)) throw new AppError("Invalid Clinic ID.", 400);
+    
+    return Doctor.find({ tenantId, isDeleted: { $ne: true }, isActive: true })
+      .select("name specialization consultationFee experience rating image availability")
+      .sort({ createdAt: -1 })
       .lean();
-
-    if (!doctor) throw new AppError("Doctor record not found.", 404, "DOCTOR_NOT_FOUND");
-    return doctor;
   }
 
   /**
-   * ✅ READ: Single Doctor Public (Profile Fix)
+   * ✅ PUBLIC: Profile View
    */
   async getDoctorByIdPublic(doctorId) {
-    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
-      throw new AppError("Invalid identification.", 400, "INVALID_DOCTOR");
-    }
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) throw new AppError("Invalid ID.", 400);
 
     const doctor = await Doctor.findOne({ _id: doctorId, isDeleted: { $ne: true } })
-      .select(
-        "name specialization consultationFee education experience status availability image createdAt tenantId about rating"
-      )
-      .populate("tenantId", "name slug") 
+      .populate("tenantId", "name slug about address")
       .lean();
 
-    if (!doctor) throw new AppError("Specialist record is no longer active.", 404, "DOCTOR_NOT_FOUND");
+    if (!doctor) throw new AppError("Specialist profile not found.", 404);
     return doctor;
   }
 
   /**
-   * ✅ UPDATE DOCTOR
+   * ✅ ADMIN: List for Dashboard
    */
-  async updateDoctor(tenantId, doctorId, updateData) {
-    if (!mongoose.Types.ObjectId.isValid(tenantId) || !mongoose.Types.ObjectId.isValid(doctorId)) {
-      throw new AppError("IDs required for update.", 400, "INVALID_ID");
-    }
-
-    const dataToUpdate = normalizeDoctorData(updateData);
-    
-    // Security: Prevent overriding critical SaaS fields
-    delete dataToUpdate.tenantId;
-    delete dataToUpdate._id;
-    delete dataToUpdate.isDeleted;
-
-    try {
-      const updated = await Doctor.findOneAndUpdate(
-        { _id: doctorId, tenantId, isDeleted: { $ne: true } },
-        { $set: dataToUpdate },
-        { new: true, runValidators: true }
-      ).lean();
-
-      if (!updated) throw new AppError("Update target not found.", 404, "DOCTOR_NOT_FOUND");
-      return updated;
-    } catch (err) {
-      if (err?.code === 11000) {
-        throw new AppError("Email collision detected.", 409, "DUPLICATE_DOCTOR_EMAIL");
-      }
-      throw err;
-    }
+  async getDoctors(tenantId) {
+    return Doctor.find({ tenantId, isDeleted: { $ne: true } })
+      .sort({ createdAt: -1 })
+      .lean();
   }
 
   /**
-   * ✅ SOFT DELETE (Archiving)
+   * ✅ UPDATE RECORD
+   */
+  async updateDoctor(tenantId, doctorId, updateData) {
+    const dataToUpdate = normalizeDoctorData(updateData);
+    delete dataToUpdate.tenantId; // Immutable context
+
+    const updated = await Doctor.findOneAndUpdate(
+      { _id: doctorId, tenantId, isDeleted: { $ne: true } },
+      { $set: dataToUpdate },
+      { new: true, runValidators: true }
+    ).lean();
+
+    if (!updated) throw new AppError("Target record not found.", 404);
+    return updated;
+  }
+
+  /**
+   * ✅ ARCHIVE (SOFT DELETE)
    */
   async softDeleteDoctor(tenantId, doctorId) {
     const updated = await Doctor.findOneAndUpdate(
       { _id: doctorId, tenantId },
-      {
-        $set: {
-          isDeleted: true,
-          deletedAt: new Date(),
-          isActive: false,
-        },
-      },
+      { $set: { isDeleted: true, isActive: false, deletedAt: new Date() } },
       { new: true }
     ).lean();
 
-    if (!updated) throw new AppError("Archive target not found.", 404, "DOCTOR_NOT_FOUND");
+    if (!updated) throw new AppError("Archive target not found.", 404);
     return updated;
   }
 }

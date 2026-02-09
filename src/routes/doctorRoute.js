@@ -3,7 +3,7 @@ import {
   createDoctor,
   getAllDoctors,
   getDoctorById,       // Admin Version
-  getDoctorByIdPublic, // Public Version (Critical for your Profile page)
+  getDoctorByIdPublic, // Public Version (Essential for Profile pages)
   updateDoctor,
   deleteDoctor,
   getPublicDoctorDirectory,
@@ -22,14 +22,14 @@ const doctorRouter = express.Router();
  * =========================
  */
 
-// All doctors directory
+// Global Directory: GET /api/doctors/directory
 doctorRouter.get("/directory", getPublicDoctorDirectory);
 
-// Public list of doctors for a specific clinic
+// Clinic-Specific List: GET /api/doctors/public/clinic/:clinicId
 doctorRouter.get("/public/clinic/:clinicId", getDoctorsByClinic);
 
-// ✅ FIX: Use a dedicated public controller
-// This ensures 'tenantId' is populated and 'isDeleted' docs are hidden
+// Public Profile: GET /api/doctors/public/:id
+// Populates tenant info and hides internal admin data
 doctorRouter.get("/public/:id", getDoctorByIdPublic);
 
 
@@ -47,24 +47,24 @@ doctorRouter.use(authorize("CLINIC_ADMIN"));
  * =========================
  */
 
-// List all doctors for the logged-in tenant
+// Dashboard List: GET /api/doctors/
 doctorRouter.get("/", getAllDoctors);
 
-// Get specific doctor (Admin view - sees more details)
+// Admin Profile View: GET /api/doctors/:id
 doctorRouter.get("/:id", getDoctorById);
 
-// Create doctor with plan enforcement and image upload
+// Create Practitioner: POST /api/doctors/
 doctorRouter.post(
   "/",
-  enforceDoctorLimit,
+  enforceDoctorLimit, // Logic check for Plan Quotas
   upload.single("image"),
   createDoctor
 );
 
-// Update doctor details
+// Update Practitioner: PUT /api/doctors/:id
 doctorRouter.put("/:id", upload.single("image"), updateDoctor);
 
-// Soft delete doctor
+// Archive Practitioner: DELETE /api/doctors/:id
 doctorRouter.delete("/:id", deleteDoctor);
 
 export default doctorRouter;

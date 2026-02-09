@@ -76,7 +76,6 @@ const tenantSchema = new Schema(
         default: "PENDING_VERIFICATION",
         index: true,
       },
-      // ✅ ADDED: Price tracking inside subscription
       price: {
         amount: { 
           type: Number, 
@@ -117,11 +116,26 @@ tenantSchema.virtual("isSubscriptionActive").get(function () {
   return String(this.subscription?.status || "").toUpperCase() === "ACTIVE";
 });
 
-// ✅ ADDED: Formatted price virtual (e.g., "₹499")
+/**
+ * ✅ FIXED: Added defensive logic to prevent "Currency code is required" crash.
+ * Defaults to INR if currency is missing in DB.
+ */
 tenantSchema.virtual("formattedSubscriptionPrice").get(function () {
   if (!this.subscription?.price) return null;
-  const { amount, currency } = this.subscription.price;
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency }).format(amount);
+
+  const amount = this.subscription.price.amount ?? 0;
+  const currencyCode = this.subscription.price.currency || "INR";
+
+  try {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: currencyCode,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  } catch (err) {
+    // If the currency code is still invalid somehow, return a simple string
+    return `₹${amount}`;
+  }
 });
 
 /* =========================================================

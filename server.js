@@ -14,6 +14,7 @@ import paymentRouter from "./src/routes/paymentRoute.js";
 import doctorRouter from "./src/routes/doctorRoute.js";
 import appointmentRouter from "./src/routes/appointmentRoute.js";
 import planRouter from "./src/routes/planRoute.js";
+import adminRouter from "./src/routes/adminRoutes.js";
 
 const app = express();
 
@@ -53,6 +54,7 @@ app.use("/api/payments", paymentRouter);
 app.use("/api/doctors", doctorRouter);
 app.use("/api/appointments", appointmentRouter);
 app.use("/api/plans", planRouter);
+app.use("/api/admin", adminRouter);
 
 /**
  * 3) CATCH 404
