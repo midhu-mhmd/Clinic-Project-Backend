@@ -108,14 +108,36 @@ class DoctorService {
   }
 
   /**
-   * ✅ PUBLIC: Global Directory (Fixes Controller Crash)
+   * ✅ PUBLIC: Global Directory with Pagination & Search
    */
-  async getAllDoctorsPublic() {
-    return Doctor.find({ isDeleted: { $ne: true }, isActive: true })
+  async getAllDoctorsPublic({ page = 1, limit = 10, search = "" } = {}) {
+    const skip = (page - 1) * limit;
+
+    const filter = { isDeleted: { $ne: true }, isActive: true };
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { specialization: { $regex: search, $options: "i" } }
+      ];
+    }
+
+    const total = await Doctor.countDocuments(filter);
+    const totalPages = Math.ceil(total / limit);
+
+    const doctors = await Doctor.find(filter)
       .select("name specialization consultationFee experience rating image availability")
-      .populate("tenantId", "name slug") // Shows which clinic they belong to
+      .populate("tenantId", "name slug")
       .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(Number(limit))
       .lean();
+
+    return {
+      data: doctors,
+      total,
+      page: Number(page),
+      totalPages
+    };
   }
 
   /**
@@ -123,7 +145,7 @@ class DoctorService {
    */
   async getDoctorsByClinicPublic(tenantId) {
     if (!mongoose.Types.ObjectId.isValid(tenantId)) throw new AppError("Invalid Clinic ID.", 400);
-    
+
     return Doctor.find({ tenantId, isDeleted: { $ne: true }, isActive: true })
       .select("name specialization consultationFee experience rating image availability")
       .sort({ createdAt: -1 })

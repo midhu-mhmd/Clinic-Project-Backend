@@ -55,6 +55,12 @@ const safeUserPayload = (user) => ({
   email: user.email,
   role: user.role,
   tenantId: user.tenantId ? String(user.tenantId) : null,
+  dob: user.dob,
+  gender: user.gender,
+  bloodGroup: user.bloodGroup,
+  address: user.address,
+  phoneNumber: user.phoneNumber,
+  image: user.image,
 });
 
 // ---------------- mailer (cached) ----------------
@@ -93,7 +99,7 @@ const sendMailBestEffort = async (mailOptions) => {
  */
 export const sendRegisterOTP = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, dob, gender, bloodGroup, address, phoneNumber } = req.body;
 
     if (!name?.trim() || !email || !password) {
       return res.status(400).json({
@@ -133,6 +139,11 @@ export const sendRegisterOTP = async (req, res) => {
       email: normalized,
       password: hashedPassword,
       otp,
+      dob,
+      gender,
+      bloodGroup,
+      address,
+      phoneNumber,
     });
 
     // For debugging (avoid in production)
@@ -202,6 +213,11 @@ export const verifyRegisterOTP = async (req, res) => {
       email: normalized,
       password: stored.password, // already hashed
       role: "PATIENT",
+      dob: stored.dob,
+      gender: stored.gender,
+      bloodGroup: stored.bloodGroup,
+      address: stored.address,
+      phoneNumber: stored.phoneNumber,
     });
 
     await deleteTempRegistration(normalized);
@@ -455,9 +471,68 @@ export const getProfile = async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found." });
     }
 
-    return res.status(200).json({ success: true, data: user });
+    return res.status(200).json({ success: true, data: safeUserPayload(user) });
   } catch (err) {
     console.error("getProfile error:", err);
+    return res.status(500).json({ success: false, message: "Server error." });
+  }
+};
+
+/**
+ * UPDATE PROFILE (requires protect middleware)
+ */
+export const updateProfile = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized." });
+    }
+
+    const { name, dob, gender, bloodGroup, address, phoneNumber } = req.body;
+
+    const updateData = {};
+    if (name) updateData.name = String(name).trim();
+
+    // Proper handling for nullables/enums/dates
+    updateData.dob = (dob === "" || dob === undefined) ? null : dob;
+    updateData.gender = (gender === "" || gender === undefined) ? null : gender;
+    updateData.bloodGroup = (bloodGroup === "" || bloodGroup === undefined) ? null : bloodGroup;
+    updateData.address = (address === "" || address === undefined) ? null : String(address).trim();
+    updateData.phoneNumber = (phoneNumber === "" || phoneNumber === undefined) ? null : String(phoneNumber).trim();
+
+    const UserModel = (await import("../models/userModel.js")).default;
+
+    // Image logic
+    if (req.file) {
+      const current = await UserModel.findById(userId);
+      const { uploadToCloudinary, deleteFromCloudinary } = await import("../utils/cloudinaryUpload.js");
+
+      if (current?.imagePublicId) {
+        await deleteFromCloudinary(current.imagePublicId).catch(() => { });
+      }
+
+      const uploaded = await uploadToCloudinary(req.file.buffer, "users");
+      updateData.image = uploaded.url;
+      updateData.imagePublicId = uploaded.publicId;
+    }
+
+    const updatedUser = await UserModel.findByIdAndUpdate(
+      userId,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Profile updated successfully.",
+      user: safeUserPayload(updatedUser),
+    });
+  } catch (err) {
+    console.error("updateProfile error:", err);
     return res.status(500).json({ success: false, message: "Server error." });
   }
 };

@@ -124,13 +124,13 @@ export const getAllPublicClinics = async ({ page = 1, limit = 20, search = "" })
    ========================================================= */
 export const getPublicDoctorsService = async (clinicId) => {
   if (!isValidObjectId(clinicId)) throw new Error("Invalid Clinic ID.");
-  
-  return await Doctor.find({ 
-    tenantId: clinicId, 
-    isDeleted: false 
+
+  return await Doctor.find({
+    tenantId: clinicId,
+    isDeleted: false
   })
-  .select("name specialty image experience education about")
-  .lean();
+    .select("name specialization image experience education about consultationFee")
+    .lean();
 };
 
 /* =========================================================
@@ -138,7 +138,7 @@ export const getPublicDoctorsService = async (clinicId) => {
    ========================================================= */
 export const registerClinicTransaction = async (ownerData, clinicData) => {
   const session = await mongoose.startSession();
-  
+
   try {
     session.startTransaction();
 
@@ -228,7 +228,7 @@ export const activateTenantSubscription = async ({
   tenantId,
   razorpayOrderId,
   razorpayPaymentId,
-  plan, 
+  plan,
 }) => {
   if (!isValidObjectId(tenantId)) throw new Error("Invalid Clinic Reference.");
 

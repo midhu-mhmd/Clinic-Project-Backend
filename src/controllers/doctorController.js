@@ -82,22 +82,29 @@ export const createDoctor = async (req, res) => {
 
   } catch (err) {
     if (uploadedAsset?.publicId) {
-      await deleteFromCloudinary(uploadedAsset.publicId).catch(() => {});
+      await deleteFromCloudinary(uploadedAsset.publicId).catch(() => { });
     }
     return sendError(res, err, "Failed to create practitioner.");
   }
 };
 
 /**
- * ✅ PUBLIC DIRECTORY (Global Search)
+ * ✅ PUBLIC DIRECTORY (Global Search + Pagination)
  */
 export const getPublicDoctorDirectory = async (req, res) => {
   try {
-    const doctors = await doctorService.getAllDoctorsPublic();
-    return res.status(200).json({ 
-      success: true, 
-      count: doctors.length, 
-      data: doctors 
+    const { page, limit, search } = req.query;
+    const result = await doctorService.getAllDoctorsPublic({ page, limit, search });
+
+    return res.status(200).json({
+      success: true,
+      count: result.data.length,
+      meta: {
+        total: result.total,
+        page: result.page,
+        totalPages: result.totalPages
+      },
+      data: result.data
     });
   } catch (err) {
     return sendError(res, err, "Failed to fetch directory.");
@@ -179,7 +186,7 @@ export const updateDoctor = async (req, res) => {
     if (req.file) {
       const current = await doctorService.getDoctorById(tenantId, id);
       if (current?.imagePublicId) {
-        await deleteFromCloudinary(current.imagePublicId).catch(() => {});
+        await deleteFromCloudinary(current.imagePublicId).catch(() => { });
       }
       newUpload = await uploadToCloudinary(req.file.buffer, "doctors");
       updateData.image = newUpload.url;
@@ -189,7 +196,7 @@ export const updateDoctor = async (req, res) => {
     const updated = await doctorService.updateDoctor(tenantId, id, updateData);
     return res.status(200).json({ success: true, message: "Practitioner updated.", data: updated });
   } catch (err) {
-    if (newUpload?.publicId) await deleteFromCloudinary(newUpload.publicId).catch(() => {});
+    if (newUpload?.publicId) await deleteFromCloudinary(newUpload.publicId).catch(() => { });
     return sendError(res, err, "Failed to update practitioner.");
   }
 };
@@ -205,7 +212,7 @@ export const deleteDoctor = async (req, res) => {
 
     const doctor = await doctorService.getDoctorById(tenantId, id);
     if (doctor?.imagePublicId) {
-      await deleteFromCloudinary(doctor.imagePublicId).catch(() => {});
+      await deleteFromCloudinary(doctor.imagePublicId).catch(() => { });
     }
 
     await doctorService.softDeleteDoctor(tenantId, id);

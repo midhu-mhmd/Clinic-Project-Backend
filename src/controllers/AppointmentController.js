@@ -48,17 +48,17 @@ const buildPatientInfoSnapshot = (raw = {}) => {
 
   const snapshot = incoming
     ? {
-        name: normalizeStr(incoming.name),
-        email: normalizeEmail(incoming.email),
-        contact: normalizeStr(incoming.contact || incoming.phone),
-        symptoms: normalizeStr(incoming.symptoms),
-      }
+      name: normalizeStr(incoming.name),
+      email: normalizeEmail(incoming.email),
+      contact: normalizeStr(incoming.contact || incoming.phone),
+      symptoms: normalizeStr(incoming.symptoms),
+    }
     : {
-        name: normalizeStr(raw.patientName || raw.name),
-        email: normalizeEmail(raw.patientEmail || raw.email),
-        contact: normalizeStr(raw.patientContact || raw.contact || raw.phone),
-        symptoms: normalizeStr(raw.symptoms || raw.notes),
-      };
+      name: normalizeStr(raw.patientName || raw.name),
+      email: normalizeEmail(raw.patientEmail || raw.email),
+      contact: normalizeStr(raw.patientContact || raw.contact || raw.phone),
+      symptoms: normalizeStr(raw.symptoms || raw.notes),
+    };
 
   if (!snapshot.name) {
     return { error: "Patient name is required." };
@@ -231,12 +231,10 @@ class AppointmentController {
       const fallbackTenantId = resolveTenantIdForPatient(req);
       const tenantId = isAdmin ? tokenTenantId : (tokenTenantId || fallbackTenantId);
 
-      if (!tenantId) {
+      if (isAdmin && !tenantId) {
         return res.status(400).json({
           success: false,
-          message: isAdmin
-            ? "Tenant context missing in token."
-            : "tenantId missing. Pass it in query (?tenantId=...) or body.",
+          message: "Tenant context missing in admin token.",
         });
       }
 

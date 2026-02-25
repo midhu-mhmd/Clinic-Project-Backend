@@ -169,14 +169,17 @@ class AppointmentService {
   }
 
   async getPatientAppointments(tenantId, patientId) {
-    if (!this.#isValidObjectId(tenantId)) throw new Error("Invalid tenantId.");
     if (!this.#isValidObjectId(patientId)) throw new Error("Invalid patientId.");
 
-    const tId = this.#toObjectId(tenantId);
-    const pId = this.#toObjectId(patientId);
+    const query = { patientId: this.#toObjectId(patientId) };
+    if (tenantId && tenantId !== "undefined" && tenantId !== "null") {
+      if (!this.#isValidObjectId(tenantId)) throw new Error("Invalid tenantId.");
+      query.tenantId = this.#toObjectId(tenantId);
+    }
 
-    return Appointment.find({ tenantId: tId, patientId: pId })
+    return Appointment.find(query)
       .populate("doctorId", "name specialization image")
+      .populate("tenantId", "name")
       .sort({ dateTime: -1 })
       .lean();
   }
