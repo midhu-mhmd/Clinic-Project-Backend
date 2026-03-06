@@ -39,6 +39,10 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    twoFactorEnabled: {
+      type: Boolean,
+      default: false,
+    },
     otpExpires: {
       type: Date,
       default: null,
@@ -77,6 +81,15 @@ const userSchema = new mongoose.Schema(
     imagePublicId: {
       type: String,
       default: null,
+    },
+    lastLogin: {
+      type: Date,
+      default: null,
+    },
+    tokenVersion: {
+      type: Number,
+      default: 0,
+      required: true,
     },
   },
   { timestamps: true },

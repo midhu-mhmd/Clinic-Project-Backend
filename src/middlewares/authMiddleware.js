@@ -52,6 +52,15 @@ const verifyAndAttachUser = async (req) => {
     throw e;
   }
 
+  // Session Invalidation: Force Logout check
+  if (user.tokenVersion !== undefined && decoded.tokenVersion !== undefined) {
+    if (decoded.tokenVersion < user.tokenVersion) {
+      const e = new Error("Session invalidated. Please login again.");
+      e.statusCode = 401;
+      throw e;
+    }
+  }
+
   req.user = {
     ...user,
     id: String(user._id),
@@ -136,22 +145,22 @@ export const protectPayment = async (req, res, next) => {
 
     req.user = user
       ? {
-          ...user,
-          id: String(user._id),
-          role: normalizeRole(user.role || decoded.role),
-          tenantId: user.tenantId
-            ? String(user.tenantId)
-            : decoded.tenantId
-              ? String(decoded.tenantId)
-              : null,
-          tokenPurpose: decoded.purpose || null,
-        }
+        ...user,
+        id: String(user._id),
+        role: normalizeRole(user.role || decoded.role),
+        tenantId: user.tenantId
+          ? String(user.tenantId)
+          : decoded.tenantId
+            ? String(decoded.tenantId)
+            : null,
+        tokenPurpose: decoded.purpose || null,
+      }
       : {
-          email: decoded.email,
-          tenantId: decoded.tenantId || null,
-          role: normalizeRole(decoded.role || "CLINIC_ADMIN"),
-          tokenPurpose: decoded.purpose || null,
-        };
+        email: decoded.email,
+        tenantId: decoded.tenantId || null,
+        role: normalizeRole(decoded.role || "CLINIC_ADMIN"),
+        tokenPurpose: decoded.purpose || null,
+      };
 
     next();
   } catch (err) {

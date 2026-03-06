@@ -5,8 +5,12 @@ import express from "express";
 import path from "path";
 import cors from "cors";
 import helmet from "helmet";
+import { createServer } from "http";
+import { Server as SocketIOServer } from "socket.io";
 
 import connectDB from "./src/config/db.js";
+import registerSignalingHandlers from "./src/socket/signalingHandler.js";
+import { startVideoReminderScheduler } from "./src/scheduler/videoReminder.js";
 
 import router from "./src/routes/userRoute.js";
 import tenantRoute from "./src/routes/tenantRoute.js";
@@ -15,15 +19,40 @@ import doctorRouter from "./src/routes/doctorRoute.js";
 import appointmentRouter from "./src/routes/appointmentRoute.js";
 import planRouter from "./src/routes/planRoute.js";
 import adminRouter from "./src/routes/adminRoutes.js";
+import ticketRouter from "./src/routes/ticketRoute.js";
+import notificationRouter from "./src/routes/notificationRoute.js";
+import videoConsultationRouter from "./src/routes/videoConsultationRoute.js";
+import chatbotRouter from "./src/routes/chatbotRoute.js";
 
 const app = express();
+const httpServer = createServer(app);
+
+const CORS_ORIGINS = [
+  "http://localhost:5173",
+  "http://127.0.0.1:4000",
+  "http://127.0.0.1:4001",
+  "http://localhost:4000",
+  "http://localhost:4001",
+];
+
+/**
+ * Socket.IO
+ */
+const io = new SocketIOServer(httpServer, {
+  cors: {
+    origin: CORS_ORIGINS,
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+});
+registerSignalingHandlers(io);
 
 /**
  * 1) GLOBAL MIDDLEWARE
  */
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: CORS_ORIGINS,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     credentials: true,
   })
@@ -55,6 +84,10 @@ app.use("/api/doctors", doctorRouter);
 app.use("/api/appointments", appointmentRouter);
 app.use("/api/plans", planRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/tickets", ticketRouter);
+app.use("/api/notifications", notificationRouter);
+app.use("/api/video-consultations", videoConsultationRouter);
+app.use("/api/chatbot", chatbotRouter);
 
 /**
  * 3) CATCH 404
@@ -89,8 +122,11 @@ const PORT = process.env.PORT || 5000;
 async function bootstrap() {
   await connectDB(); // ✅ IMPORTANT: wait for Mongo
 
-  app.listen(PORT, () => {
+  startVideoReminderScheduler(); // ⏰ 10-min-before video call reminders
+
+  httpServer.listen(PORT, () => {
     console.log(`✅ Server is running on http://localhost:${PORT}`);
+    console.log(`🔌 Socket.IO attached and listening`);
   });
 }
 

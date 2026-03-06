@@ -7,6 +7,7 @@ import { createClient } from "redis";
 import Tenant from "../models/tenantModel.js";
 import User from "../models/userModel.js";
 import Doctor from "../models/doctorModel.js";
+import Appointment from "../models/appointmentModel.js";
 
 /* =========================================================
    Subscription Configuration (Server-Side Source of Truth)
@@ -287,19 +288,165 @@ export const resendOTP = async (email) => {
 
 export const getClinicStats = async (tenantId) => {
   const tId = new mongoose.Types.ObjectId(tenantId);
-  const [totalDoctors, patientAgg] = await Promise.all([
+
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayEnd = new Date();
+  todayEnd.setHours(23, 59, 59, 999);
+
+  const [
+    totalDoctors,
+    uniquePatients,
+    todayAppointments,
+    totalRevenue
+  ] = await Promise.all([
     Doctor.countDocuments({ tenantId: tId, isDeleted: { $ne: true } }),
-    Doctor.aggregate([
-      { $match: { tenantId: tId, isDeleted: { $ne: true } } },
-      { $group: { _id: null, total: { $sum: "$patientsCount" } } },
-    ]),
+    Appointment.distinct("patientId", { tenantId: tId }),
+    Appointment.countDocuments({
+      tenantId: tId,
+      dateTime: { $gte: todayStart, $lte: todayEnd }
+    }),
+    Appointment.aggregate([
+      { $match: { tenantId: tId, status: "COMPLETED" } },
+      { $group: { _id: null, total: { $sum: "$consultationFee" } } }
+    ])
   ]);
 
-  return { totalDoctors, totalPatients: patientAgg[0]?.total || 0 };
+  return {
+    totalDoctors,
+    totalPatients: uniquePatients.length,
+    todayAppointments,
+    totalRevenue: totalRevenue[0]?.total || 0,
+    waitTime: 15 // Placeholder for now or calculate if logic exists
+  };
 };
 
 export const getTenantProfile = async (tenantId) => {
-  const tenant = await Tenant.findById(tenantId).lean();
+  const tenant = await Tenant.findById(tenantId);
   if (!tenant) throw new Error("Clinic profile does not exist.");
+  return tenant;
+};
+
+/* =========================================================
+   ✅ SUBSCRIPTION MANAGEMENT (Admin/Super-Admin)
+   ========================================================= */
+
+export const updateSubscriptionPlan = async (tenantId, newPlan, adminId) => {
+  const planInfo = getPlanDetails(newPlan);
+  const tenant = await Tenant.findByIdAndUpdate(
+    tenantId,
+    {
+      $set: {
+        "subscription.plan": planInfo.plan,
+        "subscription.price.amount": planInfo.amount,
+        "subscription.price.currency": planInfo.currency,
+      },
+      $push: {
+        auditLogs: {
+          action: "PLAN_UPGRADE_DOWNGRADE",
+          performedBy: adminId,
+          details: `Plan changed to ${planInfo.plan}`,
+        }
+      }
+    },
+    { new: true }
+  ).lean();
+  if (!tenant) throw new Error("Tenant not found.");
+  return tenant;
+};
+
+export const cancelSubscription = async (tenantId, immediate, adminId) => {
+  const update = immediate
+    ? { "subscription.status": "CANCELED", "subscription.cancelAtPeriodEnd": false }
+    : { "subscription.cancelAtPeriodEnd": true };
+
+  const tenant = await Tenant.findByIdAndUpdate(
+    tenantId,
+    {
+      $set: update,
+      $push: {
+        auditLogs: {
+          action: "SUBSCRIPTION_CANCEL",
+          performedBy: adminId,
+          details: immediate ? "Canceled immediately" : "Canceled at period end",
+        }
+      }
+    },
+    { new: true }
+  ).lean();
+  if (!tenant) throw new Error("Tenant not found.");
+  return tenant;
+};
+
+export const pauseSubscription = async (tenantId, adminId) => {
+  const tenant = await Tenant.findById(tenantId);
+  if (!tenant) throw new Error("Tenant not found.");
+
+  const isPaused = !tenant.subscription.isPaused;
+  tenant.subscription.isPaused = isPaused;
+  tenant.auditLogs.push({
+    action: "SUBSCRIPTION_PAUSE",
+    performedBy: adminId,
+    details: isPaused ? "Subscription paused" : "Subscription resumed",
+  });
+
+  await tenant.save();
+  return tenant;
+};
+
+export const applyCoupon = async (tenantId, couponCode, adminId) => {
+  // Placeholder: Real coupon logic would involve checking a Coupon model
+  const tenant = await Tenant.findByIdAndUpdate(
+    tenantId,
+    {
+      $push: {
+        auditLogs: {
+          action: "COUPON_APPLIED",
+          performedBy: adminId,
+          details: `Manual coupon applied: ${couponCode}`,
+        }
+      }
+    },
+    { new: true }
+  ).lean();
+  return tenant;
+};
+
+export const updateBillingCycle = async (tenantId, newCycle, adminId) => {
+  if (!["MONTHLY", "ANNUAL"].includes(newCycle.toUpperCase())) {
+    throw new Error("Invalid billing cycle.");
+  }
+
+  const tenant = await Tenant.findByIdAndUpdate(
+    tenantId,
+    {
+      $set: { "subscription.billingCycle": newCycle.toUpperCase() },
+      $push: {
+        auditLogs: {
+          action: "BILLING_CYCLE_CHANGE",
+          performedBy: adminId,
+          details: `Changed to ${newCycle}`,
+        }
+      }
+    },
+    { new: true }
+  ).lean();
+  return tenant;
+};
+
+export const recordManualOverride = async (tenantId, details, adminId) => {
+  const tenant = await Tenant.findByIdAndUpdate(
+    tenantId,
+    {
+      $push: {
+        auditLogs: {
+          action: "MANUAL_OVERRIDE",
+          performedBy: adminId,
+          details: details,
+        }
+      }
+    },
+    { new: true }
+  ).lean();
   return tenant;
 };

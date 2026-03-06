@@ -10,6 +10,12 @@ const doctorSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    verificationStatus: {
+      type: String,
+      enum: ["PENDING", "VERIFIED", "REJECTED"],
+      default: "PENDING",
+      index: true,
+    },
     name: {
       type: String,
       required: true,
@@ -26,6 +32,18 @@ const doctorSchema = new mongoose.Schema(
         validator: (v) => emailRegex.test(String(v || "")),
         message: "Invalid email format",
       },
+      index: true, // Added index to email field
+    },
+    regNo: {
+      type: String,
+      trim: true,
+      index: true,
+      default: "",
+    },
+    phoneNumber: {
+      type: String,
+      trim: true,
+      default: "",
     },
     specialization: {
       type: String,
@@ -108,10 +126,10 @@ doctorSchema.index({ tenantId: 1, createdAt: -1 });
 doctorSchema.pre(/^find/, async function () {
   // Safe check for options using optional chaining
   const opts = this.getOptions ? this.getOptions() : {};
-  
+
   // If includeDeleted is true, we simply return (exit) to show everything
   if (opts.includeDeleted) {
-    return; 
+    return;
   }
 
   // Otherwise, filter out soft-deleted docs

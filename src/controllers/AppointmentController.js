@@ -73,6 +73,35 @@ const buildPatientInfoSnapshot = (raw = {}) => {
 /* ----------------------------- controller ----------------------------- */
 class AppointmentController {
   /**
+   * Public: get booked slots for a doctor on a date
+   * GET /api/appointments/booked-slots?doctorId=...&date=YYYY-MM-DD
+   */
+  getBookedSlots = async (req, res) => {
+    try {
+      const { doctorId, date } = req.query;
+      if (!doctorId || !date) {
+        return res.status(400).json({
+          success: false,
+          message: "doctorId and date query params are required.",
+        });
+      }
+
+      const slots = await AppointmentService.getBookedSlots(doctorId, date);
+
+      return res.status(200).json({
+        success: true,
+        data: slots,
+      });
+    } catch (error) {
+      console.error("Controller Error (getBookedSlots):", error);
+      return res.status(400).json({
+        success: false,
+        message: error?.message || "Failed to fetch booked slots.",
+      });
+    }
+  };
+
+  /**
    * Create appointment (patient-side booking)
    * POST /api/appointments
    *
@@ -148,6 +177,7 @@ class AppointmentController {
         date,
         slot,
         consultationFee: resolveFeeNumber(raw),
+        consultationType: raw.consultationType || "in-clinic",
         patientId: userId,
         patientInfo: snapshot,
       };

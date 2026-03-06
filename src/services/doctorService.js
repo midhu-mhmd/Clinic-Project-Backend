@@ -42,6 +42,9 @@ const normalizeDoctorData = (doctorData = {}) => {
       .join(" ");
   }
 
+  if (data.regNo) data.regNo = String(data.regNo).trim();
+  if (data.phoneNumber) data.phoneNumber = String(data.phoneNumber).trim();
+
   if (data.experience !== undefined) {
     const v = Number(data.experience);
     data.experience = Number.isFinite(v) && v >= 0 ? v : 0;
@@ -110,24 +113,52 @@ class DoctorService {
   /**
    * ✅ PUBLIC: Global Directory with Pagination & Search
    */
-  async getAllDoctorsPublic({ page = 1, limit = 10, search = "" } = {}) {
+  async getAllDoctorsPublic({ page = 1, limit = 10, search = "", filters = {}, sort = { createdAt: -1 } } = {}) {
     const skip = (page - 1) * limit;
 
-    const filter = { isDeleted: { $ne: true }, isActive: true };
+    const query = { isDeleted: { $ne: true } };
+
+    // Default behavior for public view: only show active/verified? 
+    // Actually, let's make it flexible based on passed filters
+    if (filters.isActive !== undefined && filters.isActive !== "") {
+      query.isActive = filters.isActive === "true" || filters.isActive === true;
+    } else {
+      // If no filter is applied, we could default to true or show all. 
+      // The user wants a "Status filter", so let's show all if no filter is active.
+    }
+
+    if (filters.verificationStatus) {
+      query.verificationStatus = filters.verificationStatus;
+    }
+
+    if (filters.specialization) {
+      query.specialization = { $regex: filters.specialization, $options: "i" };
+    }
+
+    if (filters.tenantId) {
+      query.tenantId = filters.tenantId;
+    }
+
+    if (filters.hasSchedule === "true" || filters.hasSchedule === true) {
+      // Logic for "Has Schedule": availability is not empty/default
+      query.availability = { $exists: true, $ne: "", $not: /09:00 AM - 05:00 PM/i }; // Assuming default is 09-05
+    }
+
     if (search) {
-      filter.$or = [
+      query.$or = [
         { name: { $regex: search, $options: "i" } },
-        { specialization: { $regex: search, $options: "i" } }
+        { specialization: { $regex: search, $options: "i" } },
+        { regNo: { $regex: search, $options: "i" } },
+        { phoneNumber: { $regex: search, $options: "i" } }
       ];
     }
 
-    const total = await Doctor.countDocuments(filter);
+    const total = await Doctor.countDocuments(query);
     const totalPages = Math.ceil(total / limit);
 
-    const doctors = await Doctor.find(filter)
-      .select("name specialization consultationFee experience rating image availability")
-      .populate("tenantId", "name slug")
-      .sort({ createdAt: -1 })
+    const doctors = await Doctor.find(query)
+      .populate("tenantId", "name slug registrationId")
+      .sort(sort)
       .skip(skip)
       .limit(Number(limit))
       .lean();
@@ -138,6 +169,34 @@ class DoctorService {
       page: Number(page),
       totalPages
     };
+  }
+
+  /**
+   * ✅ ADMIN: BULK STATUS UPDATE
+   */
+  async bulkUpdateStatus(doctorIds, statusData) {
+    if (!Array.isArray(doctorIds) || doctorIds.length === 0) {
+      throw new AppError("No practitioners selected.", 400);
+    }
+
+    const update = {};
+    if (statusData.isActive !== undefined) update.isActive = statusData.isActive;
+    if (statusData.verificationStatus) update.verificationStatus = statusData.verificationStatus;
+
+    return Doctor.updateMany(
+      { _id: { $in: doctorIds } },
+      { $set: update }
+    );
+  }
+
+  /**
+   * ✅ ADMIN: EXPORT ALL FOR CSV
+   */
+  async exportDoctorsData(query = {}) {
+    return Doctor.find({ ...query, isDeleted: { $ne: true } })
+      .populate("tenantId", "name registrationId")
+      .sort({ createdAt: -1 })
+      .lean();
   }
 
   /**

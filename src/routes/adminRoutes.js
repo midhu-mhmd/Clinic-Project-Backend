@@ -1,5 +1,17 @@
 import express from "express";
-import { getStats, updateTenantStatus } from "../controllers/adminController.js";
+import {
+    getStats,
+    updateTenantStatus,
+    getTenantDetails,
+    deleteTenant,
+    impersonateTenant,
+    clearTenantCache,
+    getAllTenants,
+    getAdminProfile,
+    updateAdminProfile,
+    changeAdminPassword,
+    getAdminNotifications
+} from "../controllers/adminController.js";
 import { protect, authorize } from "../middlewares/authMiddleware.js";
 
 const adminRouter = express.Router();
@@ -15,7 +27,20 @@ adminRouter.use(authorize("SUPER_ADMIN"));
 // GET /api/admin/stats
 adminRouter.get("/stats", getStats);
 
-// PATCH /api/admin/tenants/:id/status
+// TENANT MANAGEMENT
+adminRouter.get("/tenants", getAllTenants);
+adminRouter.get("/tenants/:id", getTenantDetails);
 adminRouter.patch("/tenants/:id/status", updateTenantStatus);
+adminRouter.delete("/tenants/:id", deleteTenant);
+adminRouter.post("/tenants/:id/impersonate", impersonateTenant);
+adminRouter.post("/tenants/:id/clear-cache", clearTenantCache);
+
+// ADMIN SETTINGS
+adminRouter.get("/settings/profile", getAdminProfile);
+adminRouter.put("/settings/profile", updateAdminProfile);
+adminRouter.put("/settings/change-password", changeAdminPassword);
+
+// NOTIFICATIONS
+adminRouter.get("/notifications", getAdminNotifications);
 
 export default adminRouter;

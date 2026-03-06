@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 const { Schema } = mongoose;
 
 const PLANS = ["PRO", "ENTERPRISE", "PROFESSIONAL"];
-const STATUSES = ["ACTIVE", "PAST_DUE", "CANCELED", "PENDING_VERIFICATION"];
+const STATUSES = ["ACTIVE", "TRIALING", "PAST_DUE", "CANCELED", "INCOMPLETE", "PENDING_VERIFICATION"];
 
 const DOCTOR_LIMITS = {
   PRO: 3,
@@ -61,7 +61,22 @@ const tenantSchema = new Schema(
     settings: {
       themeColor: { type: String, default: "#8DAA9D" },
       isPublic: { type: Boolean, default: true, index: true },
+      branding: {
+        primaryColor: { type: String, default: "#000000" },
+        accentColor: { type: String, default: "#8DAA9D" },
+        bannerImage: { type: String, default: "" },
+        fontPreference: { type: String, enum: ["Serif", "Sans-Serif"], default: "Serif" },
+      },
+      notifications: {
+        patientBookings: { email: { type: Boolean, default: true }, push: { type: Boolean, default: true } },
+        appointmentReminders: { email: { type: Boolean, default: true }, push: { type: Boolean, default: false } },
+        billingAlerts: { email: { type: Boolean, default: true }, push: { type: Boolean, default: true } },
+        securityLogs: { email: { type: Boolean, default: true }, push: { type: Boolean, default: true } },
+        marketingUpdates: { email: { type: Boolean, default: false }, push: { type: Boolean, default: false } },
+      },
+      globalMute: { type: Boolean, default: false },
     },
+    isActive: { type: Boolean, default: true, index: true },
     subscription: {
       plan: {
         type: String,
@@ -77,19 +92,49 @@ const tenantSchema = new Schema(
         index: true,
       },
       price: {
-        amount: { 
-          type: Number, 
-          default: 0, 
-          required: [true, "Subscription price is required"] 
+        amount: {
+          type: Number,
+          default: 0,
+          required: [true, "Subscription price is required"]
         },
-        currency: { 
-          type: String, 
-          default: "INR", 
-          uppercase: true 
+        currency: {
+          type: String,
+          default: "INR",
+          uppercase: true
         },
       },
       razorpayOrderId: { type: String, index: true },
       razorpayPaymentId: { type: String, index: true },
+      billingCycle: {
+        type: String,
+        enum: ["MONTHLY", "ANNUAL"],
+        default: "MONTHLY",
+        index: true,
+      },
+      nextRenewalDate: {
+        type: Date,
+        index: true,
+      },
+      paymentMethodStatus: {
+        type: String,
+        enum: ["ON_FILE", "MISSING"],
+        default: "MISSING",
+        index: true,
+      },
+      cancelAtPeriodEnd: {
+        type: Boolean,
+        default: false,
+      },
+      isPaused: {
+        type: Boolean,
+        default: false,
+      },
+      auditLogs: [{
+        action: String,
+        performedBy: { type: Schema.Types.ObjectId, ref: "User" },
+        details: String,
+        timestamp: { type: Date, default: Date.now }
+      }]
     },
   },
   {

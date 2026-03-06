@@ -18,11 +18,16 @@ export const getSuperAdminStats = async () => {
       Tenant.countDocuments(),
       User.countDocuments({ role: "PATIENT" }),
       User.countDocuments({ role: "CLINIC_ADMIN" }),
-      Tenant.countDocuments({ isVerified: true }), 
+      Tenant.countDocuments({ isVerified: true }),
       Tenant.find()
         .sort({ createdAt: -1 })
         .limit(5)
         .select("name email createdAt isActive")
+    ]);
+
+    const activeTenantsRevenue = await Tenant.aggregate([
+      { $match: { "subscription.status": "ACTIVE" } },
+      { $group: { _id: null, total: { $sum: "$subscription.price.amount" } } }
     ]);
 
     // ✅ Return raw numbers only. 
@@ -33,7 +38,7 @@ export const getSuperAdminStats = async () => {
         totalPatients: totalPatients || 0,
         totalClinicAdmins: totalClinicAdmins || 0,
         activeSubscriptions: activeSubscriptions || 0,
-        totalRevenue: 0 // Placeholder: Always send a number, never a formatted string
+        totalRevenue: activeTenantsRevenue[0]?.total || 0
       },
       recentTenants: recentTenants || [],
       serverTime: new Date()

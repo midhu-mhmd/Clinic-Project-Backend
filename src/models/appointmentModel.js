@@ -45,10 +45,29 @@ const appointmentSchema = new mongoose.Schema(
       min: 0,
     },
 
+    consultationType: {
+      type: String,
+      enum: ["in-clinic", "video"],
+      default: "in-clinic",
+    },
+
     status: {
       type: String,
       enum: ["PENDING", "CONFIRMED", "CANCELLED", "COMPLETED"],
       default: "PENDING",
+      index: true,
+    },
+
+    // Video consultation meeting link (auto-generated for type=video)
+    meetingLink: {
+      type: String,
+      default: "",
+    },
+
+    // Whether the 10-min-before reminder email was sent
+    reminderSent: {
+      type: Boolean,
+      default: false,
       index: true,
     },
   },

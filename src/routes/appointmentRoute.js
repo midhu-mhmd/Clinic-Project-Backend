@@ -4,7 +4,13 @@ import { protect, restrictTo } from "../middlewares/authMiddleware.js";
 
 const appointmentRouter = express.Router();
 
-// 🛡️ All appointment routes REQUIRE a full "AUTH" token
+// Public route — no auth required
+appointmentRouter.get(
+  "/booked-slots",
+  AppointmentController.getBookedSlots
+);
+
+// 🛡️ All appointment routes below REQUIRE a full "AUTH" token
 appointmentRouter.use(protect);
 
 // 1. Specific static routes FIRST

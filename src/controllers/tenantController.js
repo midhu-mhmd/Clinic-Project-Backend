@@ -82,11 +82,35 @@ const pickAllowedTenantUpdate = (body = {}) => {
   if (Array.isArray(body.tags)) update.tags = body.tags;
 
   if (body.settings && typeof body.settings === "object") {
-    update.settings = {};
-    if (body.settings.themeColor !== undefined)
-      update.settings.themeColor = normalizeStr(body.settings.themeColor);
-    if (body.settings.isPublic !== undefined)
-      update.settings.isPublic = Boolean(body.settings.isPublic);
+    const s = body.settings;
+    // Use dot-notation for nested $set so we don't overwrite sibling fields
+    if (s.themeColor !== undefined)
+      update["settings.themeColor"] = normalizeStr(s.themeColor);
+    if (s.isPublic !== undefined)
+      update["settings.isPublic"] = Boolean(s.isPublic);
+    if (s.globalMute !== undefined)
+      update["settings.globalMute"] = Boolean(s.globalMute);
+
+    // Branding
+    if (s.branding && typeof s.branding === "object") {
+      const b = s.branding;
+      if (b.primaryColor !== undefined) update["settings.branding.primaryColor"] = normalizeStr(b.primaryColor);
+      if (b.accentColor !== undefined) update["settings.branding.accentColor"] = normalizeStr(b.accentColor);
+      if (b.bannerImage !== undefined) update["settings.branding.bannerImage"] = normalizeStr(b.bannerImage);
+      if (b.fontPreference !== undefined) update["settings.branding.fontPreference"] = normalizeStr(b.fontPreference);
+    }
+
+    // Notifications
+    if (s.notifications && typeof s.notifications === "object") {
+      const n = s.notifications;
+      const categories = ["patientBookings", "appointmentReminders", "billingAlerts", "securityLogs", "marketingUpdates"];
+      for (const cat of categories) {
+        if (n[cat] && typeof n[cat] === "object") {
+          if (n[cat].email !== undefined) update[`settings.notifications.${cat}.email`] = Boolean(n[cat].email);
+          if (n[cat].push !== undefined) update[`settings.notifications.${cat}.push`] = Boolean(n[cat].push);
+        }
+      }
+    }
   }
   return update;
 };
@@ -111,6 +135,11 @@ export const getDirectory = catchAsync(async (req, res) => {
     tier: clinic.subscription?.plan,
     price: clinic.subscription?.price,
     subscriptionStatus: clinic.subscription?.status,
+    billingCycle: clinic.subscription?.billingCycle || "MONTHLY",
+    nextRenewalDate: clinic.subscription?.nextRenewalDate,
+    paymentMethodStatus: clinic.subscription?.paymentMethodStatus || "MISSING",
+    cancelAtPeriodEnd: clinic.subscription?.cancelAtPeriodEnd || false,
+    isPaused: clinic.subscription?.isPaused || false,
   }));
 
   return res.status(200).json({
@@ -303,5 +332,101 @@ export const getSecuritySettings = catchAsync(async (req, res) => {
   return res.status(200).json({
     success: true,
     data: { twoFactor: Boolean(user.twoFactorEnabled), sessions },
+  });
+});
+
+export const updateSecuritySettings = catchAsync(async (req, res) => {
+  const { twoFactor } = req.body;
+  if (twoFactor === undefined) {
+    return res.status(400).json({ success: false, message: "Missing security preferences." });
+  }
+
+  const user = await User.findById(req.user.id);
+  if (!user) return res.status(404).json({ success: false, message: "User not found." });
+
+  user.twoFactorEnabled = Boolean(twoFactor);
+  await user.save();
+
+  return res.status(200).json({ success: true, message: "Security settings updated." });
+});
+
+/* =========================================================
+   ✅ SUPERADMIN SUBSCRIPTION MANAGEMENT
+   ========================================================= */
+
+export const updatePlan = catchAsync(async (req, res) => {
+  const { plan } = req.body;
+  const tenantId = req.params.id;
+  const adminId = req.user.id; // From protect middleware
+
+  const updated = await tenantService.updateSubscriptionPlan(tenantId, plan, adminId);
+  return res.status(200).json({
+    success: true,
+    message: `Plan updated to ${plan}`,
+    data: updated
+  });
+});
+
+export const cancelSubscription = catchAsync(async (req, res) => {
+  const { immediate } = req.body;
+  const tenantId = req.params.id;
+  const adminId = req.user.id;
+
+  const updated = await tenantService.cancelSubscription(tenantId, immediate, adminId);
+  return res.status(200).json({
+    success: true,
+    message: immediate ? "Subscription canceled immediately" : "Subscription will cancel at period end",
+    data: updated
+  });
+});
+
+export const pauseSubscription = catchAsync(async (req, res) => {
+  const tenantId = req.params.id;
+  const adminId = req.user.id;
+
+  const updated = await tenantService.pauseSubscription(tenantId, adminId);
+  return res.status(200).json({
+    success: true,
+    message: updated.subscription.isPaused ? "Subscription paused" : "Subscription resumed",
+    data: updated
+  });
+});
+
+export const applyCoupon = catchAsync(async (req, res) => {
+  const { couponCode } = req.body;
+  const tenantId = req.params.id;
+  const adminId = req.user.id;
+
+  const updated = await tenantService.applyCoupon(tenantId, couponCode, adminId);
+  return res.status(200).json({
+    success: true,
+    message: "Coupon applied successfully",
+    data: updated
+  });
+});
+
+export const updateCycle = catchAsync(async (req, res) => {
+  const { cycle } = req.body;
+  const tenantId = req.params.id;
+  const adminId = req.user.id;
+
+  const updated = await tenantService.updateBillingCycle(tenantId, cycle, adminId);
+  return res.status(200).json({
+    success: true,
+    message: `Billing cycle changed to ${cycle}`,
+    data: updated
+  });
+});
+
+export const manualOverride = catchAsync(async (req, res) => {
+  const { details } = req.body;
+  const tenantId = req.params.id;
+  const adminId = req.user.id;
+
+  const updated = await tenantService.recordManualOverride(tenantId, details, adminId);
+  return res.status(200).json({
+    success: true,
+    message: "Manual override recorded",
+    data: updated
   });
 });

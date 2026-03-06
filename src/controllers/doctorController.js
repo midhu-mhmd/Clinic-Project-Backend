@@ -93,8 +93,22 @@ export const createDoctor = async (req, res) => {
  */
 export const getPublicDoctorDirectory = async (req, res) => {
   try {
-    const { page, limit, search } = req.query;
-    const result = await doctorService.getAllDoctorsPublic({ page, limit, search });
+    const { page, limit, search, sortBy, sortOrder, ...filters } = req.query;
+
+    const sort = {};
+    if (sortBy) {
+      sort[sortBy] = sortOrder === "asc" ? 1 : -1;
+    } else {
+      sort.createdAt = -1;
+    }
+
+    const result = await doctorService.getAllDoctorsPublic({
+      page,
+      limit,
+      search,
+      filters,
+      sort
+    });
 
     return res.status(200).json({
       success: true,
@@ -108,6 +122,44 @@ export const getPublicDoctorDirectory = async (req, res) => {
     });
   } catch (err) {
     return sendError(res, err, "Failed to fetch directory.");
+  }
+};
+
+/**
+ * ✅ ADMIN: BULK STATUS UPDATE
+ */
+export const bulkUpdateStatus = async (req, res) => {
+  try {
+    const { doctorIds, isActive, verificationStatus } = req.body;
+    await doctorService.bulkUpdateStatus(doctorIds, { isActive, verificationStatus });
+
+    return res.status(200).json({
+      success: true,
+      message: `Updated status for ${doctorIds.length} practitioners.`
+    });
+  } catch (err) {
+    return sendError(res, err, "Bulk update failed.");
+  }
+};
+
+/**
+ * ✅ ADMIN: EXPORT CSV
+ */
+export const exportDoctorsCSV = async (req, res) => {
+  try {
+    const { search, ...filters } = req.query;
+    const doctors = await doctorService.exportDoctorsData(filters);
+
+    let csv = "Name,Specialization,Email,Phone,Reg No,Consult Fee,Status,Verification,Clinic,Created At\n";
+    doctors.forEach(d => {
+      csv += `"${d.name}","${d.specialization}","${d.email}","${d.phoneNumber || ''}","${d.regNo || ''}","${d.consultationFee}","${d.isActive ? 'Active' : 'Inactive'}","${d.verificationStatus}","${d.tenantId?.name || ''}","${d.createdAt}"\n`;
+    });
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", "attachment; filename=doctors_export.csv");
+    return res.status(200).send(csv);
+  } catch (err) {
+    return sendError(res, err, "Export failed.");
   }
 };
 

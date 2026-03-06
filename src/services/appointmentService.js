@@ -1,5 +1,8 @@
+import crypto from "crypto";
+import jwt from "jsonwebtoken";
 import Appointment from "../models/appointmentModel.js";
 import Doctor from "../models/doctorModel.js";
+import VideoConsultation from "../models/videoConsultationModel.js";
 import mongoose from "mongoose";
 
 class AppointmentService {
@@ -84,7 +87,7 @@ class AppointmentService {
    * - patientId MUST be injected by controller from req.user._id
    */
   async createAppointment(tenantId, appointmentData) {
-    const { doctorId, patientId, date, slot, fee } = appointmentData;
+    const { doctorId, patientId, date, slot, fee, consultationType } = appointmentData;
 
     // 1) Validate IDs
     if (!this.#isValidObjectId(tenantId)) {
@@ -134,7 +137,16 @@ class AppointmentService {
     const consultationFee = this.#normalizeFee(fee, doctor);
     const patientInfoNormalized = this.#normalizePatientInfo(appointmentData);
 
-    // 6) Create
+    // 6) Generate meeting link for video consultations
+    const type = consultationType || "in-clinic";
+    const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+    let meetingLink = "";
+    let roomId = "";
+    if (type === "video") {
+      roomId = crypto.randomBytes(16).toString("hex");
+    }
+
+    // 7) Create
     try {
       const created = await Appointment.create({
         tenantId: tId,
@@ -143,8 +155,31 @@ class AppointmentService {
         patientInfo: patientInfoNormalized,
         dateTime: appointmentDateTime,
         consultationFee,
+        consultationType: type,
+        meetingLink: "", // will be updated after JWT signing
         status: "PENDING",
       });
+
+      // 8) For video appointments: auto-create VideoConsultation + sign JWT meeting link
+      if (type === "video" && roomId) {
+        await VideoConsultation.create({
+          appointmentId: created._id,
+          roomId,
+          doctorId: dId,
+          patientId: pId,
+          tenantId: tId,
+        });
+
+        const meetingToken = jwt.sign(
+          { roomId, appointmentId: String(created._id), purpose: "VIDEO_CONSULTATION" },
+          process.env.JWT_SECRET,
+          { expiresIn: "7d" }
+        );
+
+        meetingLink = `${FRONTEND_URL}/consultation/${meetingToken}`;
+        created.meetingLink = meetingLink;
+        await Appointment.findByIdAndUpdate(created._id, { meetingLink });
+      }
 
       return created;
     } catch (err) {
@@ -154,6 +189,36 @@ class AppointmentService {
       }
       throw err;
     }
+  }
+
+  /**
+   * Get booked slots for a doctor on a given date (public)
+   */
+  async getBookedSlots(doctorId, dateStr) {
+    if (!this.#isValidObjectId(doctorId)) throw new Error("Invalid doctorId.");
+    if (!dateStr) throw new Error("Date is required.");
+
+    const [y, m, d] = String(dateStr).split("-").map(Number);
+    if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
+      throw new Error("Invalid date format. Use YYYY-MM-DD.");
+    }
+
+    const dayStart = new Date(y, m - 1, d, 0, 0, 0, 0);
+    const dayEnd = new Date(y, m - 1, d, 23, 59, 59, 999);
+
+    const appointments = await Appointment.find({
+      doctorId: this.#toObjectId(doctorId),
+      dateTime: { $gte: dayStart, $lte: dayEnd },
+      status: { $in: ["PENDING", "CONFIRMED"] },
+    })
+      .select("dateTime")
+      .lean();
+
+    const pad = (n) => String(n).padStart(2, "0");
+    return appointments.map((a) => {
+      const dt = new Date(a.dateTime);
+      return `${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+    });
   }
 
   async getTenantAppointments(tenantId, filters = {}) {

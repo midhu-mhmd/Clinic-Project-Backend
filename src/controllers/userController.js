@@ -41,6 +41,7 @@ const generateToken = (user) =>
       id: user._id,
       role: user.role,
       tenantId: user.tenantId ? String(user.tenantId) : null,
+      tokenVersion: user.tokenVersion || 0,
     },
     process.env.JWT_SECRET,
     { expiresIn: "7d" }
@@ -275,6 +276,9 @@ export const login = async (req, res) => {
       return res.status(401).json({ success: false, message: "Invalid credentials." });
     }
 
+    user.lastLogin = new Date();
+    await user.save();
+
     return res.status(200).json({
       success: true,
       token: generateToken(user),
@@ -315,7 +319,7 @@ export const googleLogin = async (req, res) => {
 
     if (!user) {
       isNewUser = true;
-
+      // ... (no change to random password logic)
       const hashedPassword = await bcrypt.hash(
         crypto.randomBytes(16).toString("hex"),
         10
@@ -336,6 +340,9 @@ export const googleLogin = async (req, res) => {
         html: welcomeEmailTemplate(name, loginLink),
       });
     }
+
+    user.lastLogin = new Date();
+    await user.save();
 
     return res.status(200).json({
       success: true,
@@ -538,36 +545,151 @@ export const updateProfile = async (req, res) => {
 };
 
 // ===================================================================
-//  ADMIN: GET ALL USERS (THIS FIXES /api/users/all NEED)
+//  ADMIN: USER MANAGEMENT
 // ===================================================================
 
 /**
  * GET ALL USERS (admin/super-admin)
- * NOTE: protect + restrictTo should guard this in routes.
+ * Implementation includes pagination, sorting, and robust filtering.
  */
 export const getAllUsers = async (req, res) => {
   try {
-    // If you want: filter by role via query (?role=PATIENT)
-    const role = String(req.query?.role || "").trim().toUpperCase();
-    const filter = role ? { role } : {};
+    const {
+      page = 1,
+      limit = 10,
+      sortBy = "createdAt",
+      sortOrder = "desc",
+      search = "",
+      role = "",
+      status = "",
+      tenantId = "",
+      createdFrom,
+      createdTo,
+      lastActiveFrom,
+    } = req.query;
 
-    // IMPORTANT:
-    // Here we use Mongoose directly because your service layer doesn't have listAll yet.
-    // If you want, I can move it into userService.
+    const skip = (Number(page) - 1) * Number(limit);
+    const filter = {};
+
+    // 1. Search (Name/Email)
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    // 2. Exact Filters
+    if (role) filter.role = role.toUpperCase();
+    if (status) filter.isActive = (status.toLowerCase() === "active");
+    if (tenantId) filter.tenantId = tenantId;
+
+    // 3. Date Filters (Created)
+    if (createdFrom || createdTo) {
+      filter.createdAt = {};
+      if (createdFrom) filter.createdAt.$gte = new Date(createdFrom);
+      if (createdTo) filter.createdAt.$lte = new Date(createdTo);
+    }
+
+    // 4. Activity Filter
+    if (lastActiveFrom) {
+      filter.lastLogin = { $gte: new Date(lastActiveFrom) };
+    }
+
     const User = (await import("../models/userModel.js")).default;
 
-    const users = await User.find(filter)
-      .select("-password")
-      .sort({ createdAt: -1 })
-      .lean();
+    const [users, total] = await Promise.all([
+      User.find(filter)
+        .populate("tenantId", "name") // populate forclickable org name
+        .select("-password")
+        .sort({ [sortBy]: sortOrder === "asc" ? 1 : -1 })
+        .skip(skip)
+        .limit(Number(limit))
+        .lean(),
+      User.countDocuments(filter),
+    ]);
 
     return res.status(200).json({
       success: true,
-      count: users.length,
       data: users,
+      pagination: {
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(total / Number(limit)),
+      },
     });
   } catch (err) {
     console.error("getAllUsers error:", err);
     return res.status(500).json({ success: false, message: "Server error." });
+  }
+};
+
+/**
+ * BULK UPDATE USERS
+ */
+export const bulkUpdateUsers = async (req, res) => {
+  try {
+    const { userIds, isActive, role } = req.body;
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({ success: false, message: "No users selected." });
+    }
+
+    const User = (await import("../models/userModel.js")).default;
+    const update = {};
+    if (isActive !== undefined) update.isActive = isActive;
+    if (role) update.role = role.toUpperCase();
+
+    await User.updateMany({ _id: { $in: userIds } }, { $set: update });
+
+    return res.status(200).json({ success: true, message: `Updated ${userIds.length} users.` });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/**
+ * FORCE LOGOUT USERS
+ */
+export const forceLogoutUsers = async (req, res) => {
+  try {
+    const { userIds } = req.body;
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({ success: false, message: "No users selected." });
+    }
+
+    const User = (await import("../models/userModel.js")).default;
+    await User.updateMany(
+      { _id: { $in: userIds } },
+      { $inc: { tokenVersion: 1 } }
+    );
+
+    return res.status(200).json({ success: true, message: `Forced logout for ${userIds.length} users.` });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/**
+ * EXPORT CSV
+ */
+export const exportUsersCSV = async (req, res) => {
+  try {
+    const User = (await import("../models/userModel.js")).default;
+    const users = await User.find()
+      .populate("tenantId", "name")
+      .select("name email role isActive isVerified lastLogin createdAt")
+      .lean();
+
+    let csv = "Name,Email,Role,Status,Verified,Last Login,Created At,Tenant\n";
+    users.forEach(u => {
+      csv += `"${u.name}","${u.email}","${u.role}","${u.isActive ? 'Active' : 'Suspended'}","${u.isVerified}","${u.lastLogin || ''}","${u.createdAt}","${u.tenantId?.name || ''}"\n`;
+    });
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", "attachment; filename=users_export.csv");
+    return res.status(200).send(csv);
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
   }
 };

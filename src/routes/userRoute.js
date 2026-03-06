@@ -8,7 +8,10 @@ import {
    googleLogin,
    requestOTP,
    resetPasswordWithOTP,
-   getAllUsers, // ✅ add this
+   getAllUsers,
+   bulkUpdateUsers,
+   forceLogoutUsers,
+   exportUsersCSV,
 } from "../controllers/userController.js";
 
 import { protect, restrictTo } from "../middlewares/authMiddleware.js"; // ✅ include restrictTo
@@ -43,6 +46,27 @@ router.get(
    protect,
    restrictTo("SUPER_ADMIN", "CLINIC_ADMIN"),
    getAllUsers
+);
+
+router.post(
+   "/bulk-update",
+   protect,
+   restrictTo("SUPER_ADMIN"),
+   bulkUpdateUsers
+);
+
+router.post(
+   "/bulk-logout",
+   protect,
+   restrictTo("SUPER_ADMIN"),
+   forceLogoutUsers
+);
+
+router.get(
+   "/export-csv",
+   protect,
+   restrictTo("SUPER_ADMIN"),
+   exportUsersCSV
 );
 
 export default router;

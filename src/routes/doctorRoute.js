@@ -8,6 +8,8 @@ import {
   deleteDoctor,
   getPublicDoctorDirectory,
   getDoctorsByClinic,
+  bulkUpdateStatus,
+  exportDoctorsCSV,
 } from "../controllers/doctorController.js";
 
 import upload from "../middlewares/uploadMiddleware.js";
@@ -66,5 +68,11 @@ doctorRouter.put("/:id", upload.single("image"), updateDoctor);
 
 // Archive Practitioner: DELETE /api/doctors/:id
 doctorRouter.delete("/:id", deleteDoctor);
+
+// Bulk Status Update: POST /api/doctors/bulk-status
+doctorRouter.post("/bulk-status", bulkUpdateStatus);
+
+// Export CSV: GET /api/doctors/export-csv
+doctorRouter.get("/export-csv", exportDoctorsCSV);
 
 export default doctorRouter;
