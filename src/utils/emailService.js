@@ -23,8 +23,9 @@ const transporter = nodemailer.createTransport({
  */
 export const sendEmail = async (options) => {
   try {
+    const senderEmail = process.env.SMTP_USER || process.env.EMAIL_USER;
     const mailOptions = {
-      from: `"Sovereign Protocol" <${process.env.SMTP_USER}>`,
+      from: `"Sovereign HealthBook" <${senderEmail}>`,
       to: options.to,
       subject: options.subject,
       html: options.html,

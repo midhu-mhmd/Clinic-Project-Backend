@@ -1,4 +1,8 @@
 import AppointmentService from "../services/appointmentService.js";
+import NotificationService from "../services/notificationService.js";
+import Doctor from "../models/doctorModel.js";
+import nodemailer from "nodemailer";
+import { appointmentBookedDoctorTemplate } from "../utils/emailTemplates.js";
 
 /* ----------------------------- helpers ----------------------------- */
 const normalizeStr = (v) => String(v ?? "").trim();
@@ -186,6 +190,60 @@ class AppointmentController {
         tenantId,
         appointmentData
       );
+
+      // --- Post-booking notifications (fire-and-forget) ---
+      try {
+        const doctor = await Doctor.findById(appointmentData.doctorId)
+          .select("name email")
+          .lean();
+
+        const pad = (n) => String(n).padStart(2, "0");
+        const dt = appointment.dateTime ? new Date(appointment.dateTime) : null;
+        const dateTimeStr = dt
+          ? `${pad(dt.getDate())} ${dt.toLocaleString("default", { month: "short" })} ${dt.getFullYear()}, ${pad(dt.getHours() % 12 || 12)}:${pad(dt.getMinutes())} ${dt.getHours() >= 12 ? "PM" : "AM"}`
+          : "N/A";
+
+        // 1) Email notification to doctor
+        if (doctor?.email) {
+          const transporter = nodemailer.createTransport({
+            host: "smtp.gmail.com",
+            port: 465,
+            secure: true,
+            auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+          });
+
+          transporter.sendMail({
+            from: `"Sovereign Protocol" <${process.env.EMAIL_USER}>`,
+            to: doctor.email,
+            subject: "New Appointment Booked | Sovereign",
+            html: appointmentBookedDoctorTemplate(
+              doctor.name,
+              snapshot.name,
+              dateTimeStr,
+              appointmentData.consultationType,
+              appointment.consultationFee
+            ),
+          }).catch((e) => console.error("Doctor email notification failed:", e.message));
+        }
+
+        // 2) In-app notification to patient (include meeting link for video)
+        if (userId) {
+          const notifMeta = { appointmentId: appointment._id };
+          const notifLink = appointment.meetingLink || "";
+          if (notifLink) notifMeta.meetingLink = notifLink;
+
+          NotificationService.create({
+            recipient: userId,
+            type: "APPOINTMENT",
+            title: "Appointment Confirmed",
+            message: `Your ${appointmentData.consultationType === "video" ? "video consultation" : "in-clinic appointment"} with Dr. ${doctor?.name || "your doctor"} is booked for ${dateTimeStr}.${appointment.meetingLink ? " Click to join the video call." : ""}`,
+            meta: notifMeta,
+            link: notifLink,
+          }).catch((e) => console.error("Patient notification failed:", e.message));
+        }
+      } catch (notifErr) {
+        console.error("Post-booking notification error:", notifErr.message);
+      }
 
       return res.status(201).json({
         success: true,

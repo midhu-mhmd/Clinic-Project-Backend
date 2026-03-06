@@ -168,7 +168,7 @@ export const videoReminderTemplate = (recipientName, role, otherPartyName, dateT
       <div class="brand">SOVEREIGN</div>
     </div>
     <div class="content">
-      <span class="alert-tag">Consultation in 10 Minutes</span>
+      <span class="alert-tag">Consultation in 5 Minutes</span>
       <h1>Your <b>Video</b> Session Awaits</h1>
       <p>${recipientName}, your upcoming video consultation is about to begin. Please ensure your camera and microphone are ready.</p>
 
@@ -184,6 +184,73 @@ export const videoReminderTemplate = (recipientName, role, otherPartyName, dateT
       <a href="${meetingLink}" class="cta-button">Join Video Call &rarr;</a>
 
       <p style="font-size: 12px; color: #9ca3af; margin-top: 40px;">If you did not book this appointment, please ignore this email.</p>
+    </div>
+    <div class="footer">
+      SOVEREIGN HEALTHBOOK / PRECISION CARE — 2026
+    </div>
+  </div>
+</body>
+</html>
+`;
+
+/**
+ * Appointment Booked — sent to doctor when a patient books
+ * @param {string} doctorName
+ * @param {string} patientName
+ * @param {string} dateTimeStr - e.g. "06 Mar 2026, 02:30 PM"
+ * @param {string} consultationType - "in-clinic" | "video"
+ * @param {number} fee
+ */
+export const appointmentBookedDoctorTemplate = (doctorName, patientName, dateTimeStr, consultationType, fee) => `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;700&display=swap');
+    body { margin: 0; padding: 0; background-color: #ffffff; font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
+    .main { width: 100%; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; }
+    .header { padding: 40px; border-bottom: 1px solid #f3f4f6; }
+    .brand { font-size: 11px; letter-spacing: 4px; text-transform: uppercase; color: #1a1a1a; font-weight: 700; }
+    .content { padding: 60px 40px; }
+    .alert-tag { font-size: 9px; color: #8DAA9D; letter-spacing: 2px; text-transform: uppercase; font-weight: 700; margin-bottom: 15px; display: block; }
+    h1 { font-size: 40px; font-weight: 300; letter-spacing: -2px; line-height: 1.1; margin: 0; color: #1a1a1a; }
+    h1 b { font-family: serif; font-style: italic; font-weight: 400; color: #8DAA9D; }
+    p { font-size: 15px; color: #4b5563; line-height: 1.8; margin: 25px 0; }
+    .detail-box { background-color: #f9fafb; padding: 20px; border-left: 2px solid #8DAA9D; margin: 20px 0; }
+    .detail-label { font-size: 9px; color: #9ca3af; text-transform: uppercase; letter-spacing: 1px; }
+    .detail-value { font-size: 15px; font-weight: 700; color: #1a1a1a; margin-top: 4px; }
+    .footer { padding: 30px 40px; border-top: 1px solid #f3f4f6; font-size: 9px; color: #9ca3af; letter-spacing: 1px; text-transform: uppercase; }
+  </style>
+</head>
+<body>
+  <div class="main">
+    <div class="header">
+      <div class="brand">SOVEREIGN</div>
+    </div>
+    <div class="content">
+      <span class="alert-tag">New Appointment Booked</span>
+      <h1>New <b>Patient</b> Booking</h1>
+      <p>Dr. ${doctorName}, a new appointment has been booked with you. Please review the details below.</p>
+
+      <div class="detail-box">
+        <div class="detail-label">Patient</div>
+        <div class="detail-value">${patientName}</div>
+      </div>
+      <div class="detail-box">
+        <div class="detail-label">Date &amp; Time</div>
+        <div class="detail-value">${dateTimeStr}</div>
+      </div>
+      <div class="detail-box">
+        <div class="detail-label">Consultation Type</div>
+        <div class="detail-value">${consultationType === 'video' ? 'Video Consultation' : 'In-Clinic Visit'}</div>
+      </div>
+      <div class="detail-box">
+        <div class="detail-label">Consultation Fee</div>
+        <div class="detail-value">\u20B9${fee}</div>
+      </div>
+
+      <p style="font-size: 12px; color: #9ca3af; margin-top: 40px;">Log in to your dashboard to manage this appointment.</p>
     </div>
     <div class="footer">
       SOVEREIGN HEALTHBOOK / PRECISION CARE — 2026

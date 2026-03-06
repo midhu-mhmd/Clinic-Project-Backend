@@ -11,7 +11,7 @@ class ChatbotController {
       const userId = resolveUserId(req);
       const session = await ChatbotService.createSession(userId);
 
-      return res.status(201).json({ success: true, data: session });
+      return res.status(201).json({ success: true, session });
     } catch (error) {
       return res.status(400).json({
         success: false,
@@ -28,7 +28,7 @@ class ChatbotController {
       const userId = resolveUserId(req);
       const sessions = await ChatbotService.getUserSessions(userId);
 
-      return res.status(200).json({ success: true, data: sessions });
+      return res.status(200).json({ success: true, sessions });
     } catch (error) {
       return res.status(400).json({
         success: false,
@@ -45,7 +45,7 @@ class ChatbotController {
       const userId = resolveUserId(req);
       const session = await ChatbotService.getSession(req.params.id, userId);
 
-      return res.status(200).json({ success: true, data: session });
+      return res.status(200).json({ success: true, session });
     } catch (error) {
       return res.status(400).json({
         success: false,
@@ -68,7 +68,12 @@ class ChatbotController {
 
       const result = await ChatbotService.sendMessage(req.params.id, userId, message);
 
-      return res.status(200).json({ success: true, data: result });
+      return res.status(200).json({
+        success: true,
+        session: result.session,
+        messages: result.messages,
+        context: result.context,
+      });
     } catch (error) {
       return res.status(400).json({
         success: false,

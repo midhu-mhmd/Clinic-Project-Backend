@@ -29,6 +29,8 @@ const httpServer = createServer(app);
 
 const CORS_ORIGINS = [
   "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://127.0.0.1:5174",
   "http://127.0.0.1:4000",
   "http://127.0.0.1:4001",
   "http://localhost:4000",
@@ -122,7 +124,7 @@ const PORT = process.env.PORT || 5000;
 async function bootstrap() {
   await connectDB(); // ✅ IMPORTANT: wait for Mongo
 
-  startVideoReminderScheduler(); // ⏰ 10-min-before video call reminders
+  await startVideoReminderScheduler(); // ⏰ 5-min-before video call reminders
 
   httpServer.listen(PORT, () => {
     console.log(`✅ Server is running on http://localhost:${PORT}`);
