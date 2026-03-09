@@ -5,6 +5,7 @@ import Ticket from "../models/ticketModel.js";
 import Tenant from "../models/tenantModel.js";
 import mongoose from "mongoose";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import RagService from "./ragService.js";
 
 /* =========================================================
    Gemini LLM Setup
@@ -124,6 +125,7 @@ const SYSTEM_PROMPT = `You are an AI-powered virtual nurse assistant for Soverei
 6. **Follow-up Recommendations**: After analyzing symptoms, suggest when to follow up or when symptoms warrant immediate medical attention.
 7. **Prescription Summary**: If a patient describes a prescription or medication, extract and summarize the doctor's recommendations.
 8. **Ticket Creation**: If the patient's issue cannot be resolved through symptom analysis (billing, technical, account issues), offer to create a support ticket.
+9. **Knowledge Base**: You have access to a medical knowledge base. When relevant context is provided from the knowledge base, use it to give more accurate and detailed answers. Always cite your sources when using knowledge base information.
 
 ## Rules:
 - Always be empathetic, professional and reassuring.
@@ -243,8 +245,19 @@ class ChatbotService {
     return extra;
   }
 
+  /* ---------- Retrieve RAG context for the latest user message ---------- */
+  async #getRAGContext(message) {
+    try {
+      const { context, sources } = await RagService.query(message);
+      return { ragContext: context, ragSources: sources };
+    } catch (err) {
+      console.error("RAG query failed:", err.message);
+      return { ragContext: "", ragSources: [] };
+    }
+  }
+
   /* ---------- Generate LLM response ---------- */
-  async #generateLLMResponse(session) {
+  async #generateLLMResponse(session, ragContext) {
     // Build conversation history for Gemini (last 20 messages for context window)
     const recentMessages = session.messages.slice(-20);
     const conversationParts = recentMessages.map((m) => ({
@@ -267,6 +280,11 @@ class ChatbotService {
     }
     if (session.context.isEmergency) {
       contextInfo += `\n⚠️ EMERGENCY detected in this session.`;
+    }
+
+    // Add RAG knowledge context if available
+    if (ragContext) {
+      contextInfo += `\n\n## Relevant Knowledge Base Context:\n${ragContext}\n\nUse the above knowledge base information to provide more accurate and detailed answers. Cite the source titles when referencing this information.`;
     }
 
     const chat = geminiModel.startChat({
@@ -418,10 +436,13 @@ class ChatbotService {
       session.context.severity = "mild";
     }
 
+    // ── Retrieve RAG context ──
+    const { ragContext, ragSources } = await this.#getRAGContext(message);
+
     // ── Generate response ──
     if (geminiModel) {
       try {
-        const rawResponse = await this.#generateLLMResponse(session);
+        const rawResponse = await this.#generateLLMResponse(session, ragContext);
         const { cleanText, actions } = this.#parseActions(rawResponse);
         responseText = cleanText;
 
@@ -467,6 +488,7 @@ class ChatbotService {
       session: { _id: session._id, title: session.title },
       messages: session.messages,
       context: session.context,
+      ragSources: ragSources?.length > 0 ? ragSources : undefined,
     };
   }
 

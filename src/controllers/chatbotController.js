@@ -73,6 +73,7 @@ class ChatbotController {
         session: result.session,
         messages: result.messages,
         context: result.context,
+        ragSources: result.ragSources,
       });
     } catch (error) {
       return res.status(400).json({
