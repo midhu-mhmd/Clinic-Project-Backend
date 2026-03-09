@@ -11,6 +11,7 @@ import { Server as SocketIOServer } from "socket.io";
 import connectDB from "./src/config/db.js";
 import registerSignalingHandlers from "./src/socket/signalingHandler.js";
 import { startVideoReminderScheduler } from "./src/scheduler/videoReminder.js";
+import { startSlaEnforcer } from "./src/scheduler/slaEnforcer.js";
 
 import router from "./src/routes/userRoute.js";
 import tenantRoute from "./src/routes/tenantRoute.js";
@@ -125,6 +126,7 @@ async function bootstrap() {
   await connectDB(); // ✅ IMPORTANT: wait for Mongo
 
   await startVideoReminderScheduler(); // ⏰ 5-min-before video call reminders
+  startSlaEnforcer(); // ⏰ SLA breach detection every 5 min
 
   httpServer.listen(PORT, () => {
     console.log(`✅ Server is running on http://localhost:${PORT}`);

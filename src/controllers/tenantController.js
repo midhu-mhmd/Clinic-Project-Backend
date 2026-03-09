@@ -1,6 +1,9 @@
 import * as tenantService from "../services/tenantService.js";
 import Tenant from "../models/tenantModel.js";
 import User from "../models/userModel.js";
+import Plan from "../models/planModel.js";
+import Doctor from "../models/doctorModel.js";
+import Appointment from "../models/appointmentModel.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { v2 as cloudinary } from "cloudinary";
@@ -214,15 +217,6 @@ export const loginTenant = catchAsync(async (req, res) => {
     return res.status(403).json({ success: false, message: "Please verify email first." });
   }
 
-  const tenant = await Tenant.findById(user.tenantId).select("subscription");
-  if (tenant?.subscription?.status !== "ACTIVE") {
-    return res.status(402).json({
-      success: false,
-      message: "Payment required.",
-      data: { status: tenant?.subscription?.status },
-    });
-  }
-
   const token = signAuthToken(user);
   return res.status(200).json({ success: true, token, data: { user } });
 });
@@ -318,6 +312,34 @@ export const changePassword = catchAsync(async (req, res) => {
 export const getStats = catchAsync(async (req, res) => {
   const stats = await tenantService.getClinicStats(req.user.tenantId);
   return res.status(200).json({ success: true, data: stats });
+});
+
+export const getPlanUsage = catchAsync(async (req, res) => {
+  const tenantId = req.user.tenantId;
+  const tenant = await Tenant.findById(tenantId).select("subscription.plan subscription.status").lean();
+  if (!tenant) return res.status(404).json({ success: false, message: "Tenant not found." });
+
+  const planName = String(tenant.subscription?.plan || "FREE").toUpperCase();
+  const plan = await Plan.findOne({ name: planName, isActive: true })
+    .select("name limits features price tierLevel")
+    .lean();
+
+  const [doctorCount, uniquePatients] = await Promise.all([
+    Doctor.countDocuments({ tenantId, isDeleted: { $ne: true } }),
+    Appointment.distinct("patientId", { tenantId }),
+  ]);
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      plan: plan || { name: planName, limits: {} },
+      subscriptionStatus: tenant.subscription?.status,
+      usage: {
+        doctors: { current: doctorCount, max: plan?.limits?.maxDoctors ?? 0 },
+        patients: { current: uniquePatients.length, max: plan?.limits?.maxPatients ?? 0 },
+      },
+    },
+  });
 });
 
 export const getSecuritySettings = catchAsync(async (req, res) => {

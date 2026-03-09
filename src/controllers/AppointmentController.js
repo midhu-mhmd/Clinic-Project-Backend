@@ -1,8 +1,9 @@
 import AppointmentService from "../services/appointmentService.js";
 import NotificationService from "../services/notificationService.js";
 import Doctor from "../models/doctorModel.js";
+import User from "../models/userModel.js";
 import nodemailer from "nodemailer";
-import { appointmentBookedDoctorTemplate } from "../utils/emailTemplates.js";
+import { appointmentBookedDoctorTemplate, appointmentBookedPatientTemplate } from "../utils/emailTemplates.js";
 
 /* ----------------------------- helpers ----------------------------- */
 const normalizeStr = (v) => String(v ?? "").trim();
@@ -197,49 +198,88 @@ class AppointmentController {
           .select("name email")
           .lean();
 
+        const patient = await User.findById(userId)
+          .select("name email")
+          .lean();
+
         const pad = (n) => String(n).padStart(2, "0");
         const dt = appointment.dateTime ? new Date(appointment.dateTime) : null;
         const dateTimeStr = dt
           ? `${pad(dt.getDate())} ${dt.toLocaleString("default", { month: "short" })} ${dt.getFullYear()}, ${pad(dt.getHours() % 12 || 12)}:${pad(dt.getMinutes())} ${dt.getHours() >= 12 ? "PM" : "AM"}`
           : "N/A";
 
-        // 1) Email notification to doctor
-        if (doctor?.email) {
-          const transporter = nodemailer.createTransport({
-            host: "smtp.gmail.com",
-            port: 465,
-            secure: true,
-            auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-          });
+        const transporter = nodemailer.createTransport({
+          host: "smtp.gmail.com",
+          port: 465,
+          secure: true,
+          auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+        });
 
+        // 1) Email notification to doctor (no meeting link — sent 5 min before)
+        if (doctor?.email) {
           transporter.sendMail({
             from: `"Sovereign Protocol" <${process.env.EMAIL_USER}>`,
             to: doctor.email,
-            subject: "New Appointment Booked | Sovereign",
+            subject: appointmentData.consultationType === "video"
+              ? "New Video Consultation Booked | Sovereign"
+              : "New Appointment Booked | Sovereign",
             html: appointmentBookedDoctorTemplate(
               doctor.name,
               snapshot.name,
               dateTimeStr,
               appointmentData.consultationType,
-              appointment.consultationFee
+              appointment.consultationFee,
+              ""
             ),
           }).catch((e) => console.error("Doctor email notification failed:", e.message));
         }
 
-        // 2) In-app notification to patient (include meeting link for video)
+        // 2) Email notification to patient (no meeting link — sent 5 min before)
+        const patientEmail = patient?.email || snapshot.email;
+        if (patientEmail) {
+          transporter.sendMail({
+            from: `"Sovereign Protocol" <${process.env.EMAIL_USER}>`,
+            to: patientEmail,
+            subject: appointmentData.consultationType === "video"
+              ? "Video Consultation Confirmed | Sovereign"
+              : "Appointment Confirmed | Sovereign",
+            html: appointmentBookedPatientTemplate(
+              snapshot.name,
+              doctor?.name || "your doctor",
+              dateTimeStr,
+              appointmentData.consultationType,
+              appointment.consultationFee,
+              ""
+            ),
+          }).catch((e) => console.error("Patient email notification failed:", e.message));
+        }
+
+        // 3) In-app notification to patient (no meeting link — sent 5 min before)
         if (userId) {
           const notifMeta = { appointmentId: appointment._id };
-          const notifLink = appointment.meetingLink || "";
-          if (notifLink) notifMeta.meetingLink = notifLink;
 
           NotificationService.create({
             recipient: userId,
             type: "APPOINTMENT",
             title: "Appointment Confirmed",
-            message: `Your ${appointmentData.consultationType === "video" ? "video consultation" : "in-clinic appointment"} with Dr. ${doctor?.name || "your doctor"} is booked for ${dateTimeStr}.${appointment.meetingLink ? " Click to join the video call." : ""}`,
+            message: `Your ${appointmentData.consultationType === "video" ? "video consultation" : "in-clinic appointment"} with Dr. ${doctor?.name || "your doctor"} is booked for ${dateTimeStr}.${appointmentData.consultationType === "video" ? " Meeting link will be sent 5 minutes before the session." : ""}`,
             meta: notifMeta,
-            link: notifLink,
           }).catch((e) => console.error("Patient notification failed:", e.message));
+        }
+
+        // 4) In-app notification to clinic admin (for doctor awareness)
+        const Tenant = (await import("../models/tenantModel.js")).default;
+        const tenant = await Tenant.findById(tenantId).select("ownerId").lean();
+        if (tenant?.ownerId) {
+          const adminNotifMeta = { appointmentId: appointment._id };
+
+          NotificationService.create({
+            recipient: tenant.ownerId,
+            type: "APPOINTMENT",
+            title: "New Patient Booking",
+            message: `${snapshot.name} booked a ${appointmentData.consultationType === "video" ? "video consultation" : "in-clinic appointment"} with Dr. ${doctor?.name || "a doctor"} for ${dateTimeStr}.`,
+            meta: adminNotifMeta,
+          }).catch((e) => console.error("Clinic admin notification failed:", e.message));
         }
       } catch (notifErr) {
         console.error("Post-booking notification error:", notifErr.message);

@@ -2,14 +2,8 @@ import mongoose from "mongoose";
 
 const { Schema } = mongoose;
 
-const PLANS = ["PRO", "ENTERPRISE", "PROFESSIONAL"];
+const PLANS = ["FREE", "PRO", "ENTERPRISE", "PROFESSIONAL"];
 const STATUSES = ["ACTIVE", "TRIALING", "PAST_DUE", "CANCELED", "INCOMPLETE", "PENDING_VERIFICATION"];
-
-const DOCTOR_LIMITS = {
-  PRO: 3,
-  ENTERPRISE: 5,
-  PROFESSIONAL: Number.POSITIVE_INFINITY,
-};
 
 const tenantSchema = new Schema(
   {
@@ -81,7 +75,7 @@ const tenantSchema = new Schema(
       plan: {
         type: String,
         enum: PLANS,
-        default: "PRO",
+        default: "FREE",
         required: true,
         index: true,
       },
@@ -153,6 +147,7 @@ tenantSchema.virtual("subscriptionPlan").get(function () {
 });
 
 tenantSchema.virtual("doctorLimit").get(function () {
+  const DOCTOR_LIMITS = { FREE: 1, PRO: 3, ENTERPRISE: 5, PROFESSIONAL: Number.POSITIVE_INFINITY };
   const plan = String(this.subscription?.plan || "").toUpperCase();
   return DOCTOR_LIMITS[plan] ?? 0;
 });

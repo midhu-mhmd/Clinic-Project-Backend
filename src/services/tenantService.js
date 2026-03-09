@@ -71,11 +71,61 @@ export const signPaymentToken = ({ tenantId, email, role = "CLINIC_ADMIN" }) => 
    Redis & Email (Singleton Logic)
    ========================================================= */
 let redisClient;
+let redisAvailable = false;
+
+// In-memory OTP fallback when Redis is unavailable
+const memoryOtpStore = new Map();
+
 export const initRedis = async () => {
   if (redisClient?.isOpen) return redisClient;
-  redisClient = createClient({ url: process.env.REDIS_URL || "redis://127.0.0.1:6379" });
-  await redisClient.connect();
-  return redisClient;
+  try {
+    redisClient = createClient({
+      url: process.env.REDIS_URL || "redis://127.0.0.1:6379",
+      socket: { connectTimeout: 5000, reconnectStrategy: false },
+    });
+    redisClient.on("error", () => {});
+    await redisClient.connect();
+    redisAvailable = true;
+    return redisClient;
+  } catch {
+    redisAvailable = false;
+    redisClient = null;
+    console.warn("Redis unavailable — using in-memory OTP store.");
+    return null;
+  }
+};
+
+const setOtp = async (email, otp, ttlSeconds = 600) => {
+  const key = otpKey(email);
+  try {
+    const client = await initRedis();
+    if (client) {
+      await client.setEx(key, ttlSeconds, otp);
+      return;
+    }
+  } catch { /* fall through */ }
+  memoryOtpStore.set(key, { otp, expires: Date.now() + ttlSeconds * 1000 });
+};
+
+const getOtp = async (email) => {
+  const key = otpKey(email);
+  try {
+    const client = await initRedis();
+    if (client) return await client.get(key);
+  } catch { /* fall through */ }
+  const entry = memoryOtpStore.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expires) { memoryOtpStore.delete(key); return null; }
+  return entry.otp;
+};
+
+const delOtp = async (email) => {
+  const key = otpKey(email);
+  try {
+    const client = await initRedis();
+    if (client) { await client.del(key); return; }
+  } catch { /* fall through */ }
+  memoryOtpStore.delete(key);
 };
 
 const otpKey = (email) => `otp:${normalizeEmail(email)}`;
@@ -168,12 +218,8 @@ export const registerClinicTransaction = async (ownerData, clinicData) => {
       address: normalizeStr(clinicData.address),
       ownerId: userDoc._id,
       subscription: {
-        plan: planInfo.plan,
-        status: "PENDING_VERIFICATION",
-        price: {
-          amount: planInfo.amount,
-          currency: planInfo.currency
-        }
+        plan: "FREE",
+        status: "ACTIVE",
       },
       settings: { isPublic: true }
     }], { session });
@@ -184,8 +230,7 @@ export const registerClinicTransaction = async (ownerData, clinicData) => {
     await session.commitTransaction();
 
     const otp = generateOtp6();
-    const client = await initRedis();
-    await client.setEx(otpKey(emailLower), 600, otp);
+    await setOtp(emailLower, otp, 600);
 
     await getTransporter().sendMail({
       from: `"Medicare Systems" <${process.env.EMAIL_USER}>`,
@@ -261,13 +306,12 @@ export const verifyUserEmail = async (email, otp) => {
   const user = await User.findOne({ email: emailLower });
   if (!user) throw new Error("Credentials not found.");
 
-  const client = await initRedis();
-  const storedOtp = await client.get(otpKey(emailLower));
+  const storedOtp = await getOtp(emailLower);
   if (!storedOtp || storedOtp !== String(otp)) throw new Error("Invalid/Expired code.");
 
   user.isVerified = true;
   await user.save();
-  await client.del(otpKey(emailLower));
+  await delOtp(emailLower);
 
   return { user };
 };
@@ -275,8 +319,7 @@ export const verifyUserEmail = async (email, otp) => {
 export const resendOTP = async (email) => {
   const emailLower = normalizeEmail(email);
   const otp = generateOtp6();
-  const client = await initRedis();
-  await client.setEx(otpKey(emailLower), 600, otp);
+  await setOtp(emailLower, otp, 600);
 
   await getTransporter().sendMail({
     from: `"Medicare Systems" <${process.env.EMAIL_USER}>`,

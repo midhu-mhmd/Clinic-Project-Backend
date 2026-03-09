@@ -7,6 +7,15 @@ dotenv.config();
 
 const PLANS = [
   {
+    name: "FREE",
+    description: "Basic free tier for getting started with essential clinic features.",
+    price: { monthly: 0, yearly: 0, currency: "INR" },
+    limits: { maxDoctors: 1, maxPatients: 50, maxStorageGB: 1, allowAPI: false, customBranding: false },
+    features: ["Clinic onboarding", "1 Doctor", "Up to 50 patients", "Basic appointments"],
+    isActive: true,
+    tierLevel: 0,
+  },
+  {
     name: "PRO",
     description: "For small clinics getting started with core appointment & tenant management.",
     price: { monthly: 1999, yearly: 19990, currency: "INR" },

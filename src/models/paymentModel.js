@@ -117,8 +117,14 @@ const paymentSchema = new Schema(
 =========================== */
 
 // Avoid duplicate order/payment entries (sparse = allow nulls)
-paymentSchema.index({ razorpayOrderId: 1 }, { unique: true, sparse: true });
-paymentSchema.index({ razorpayPaymentId: 1 }, { unique: true, sparse: true });
+paymentSchema.index(
+  { razorpayOrderId: 1 },
+  { unique: true, partialFilterExpression: { razorpayOrderId: { $type: "string" } } }
+);
+paymentSchema.index(
+  { razorpayPaymentId: 1 },
+  { unique: true, partialFilterExpression: { razorpayPaymentId: { $type: "string" } } }
+);
 
 // Fast queries: tenant billing history
 paymentSchema.index({ tenantId: 1, createdAt: -1 });

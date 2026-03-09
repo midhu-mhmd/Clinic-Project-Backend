@@ -20,7 +20,7 @@ const formatDateTime = (dt) => {
 };
 
 /**
- * Find video appointments starting in the next 3–7 minutes that
+ * Find video appointments starting in ~5 minutes that
  * haven't had their reminder sent yet, then:
  *   1) Email the meeting link to the doctor
  *   2) Email the meeting link to the patient
@@ -34,8 +34,8 @@ const formatDateTime = (dt) => {
 const sendVideoReminders = async (verbose = false) => {
   try {
     const now = new Date();
-    const windowStart = new Date(now.getTime() + 3 * 60 * 1000); // +3 min
-    const windowEnd = new Date(now.getTime() + 7 * 60 * 1000);   // +7 min
+    const windowStart = new Date(now.getTime() + 4.5 * 60 * 1000); // +4.5 min
+    const windowEnd = new Date(now.getTime() + 5.5 * 60 * 1000);   // +5.5 min
 
     const shouldLog = verbose || now.getMinutes() % 5 === 0;
 
@@ -43,7 +43,7 @@ const sendVideoReminders = async (verbose = false) => {
       console.log(`[Reminder] ⏰ Heartbeat — now=${now.toISOString()}, scanning window ${windowStart.toISOString()} → ${windowEnd.toISOString()}`);
     }
 
-    // ── 1) UPCOMING: Appointments in the 3-7 min future window ──
+    // ── 1) UPCOMING: Appointments in the ~5 min future window ──
     const upcomingAppointments = await Appointment.find({
       consultationType: "video",
       reminderSent: false,
@@ -87,7 +87,8 @@ const sendVideoReminders = async (verbose = false) => {
       const patientName = appt.patientInfo?.name || appt.patientId?.name || "Patient";
       const patientEmail = appt.patientInfo?.email || appt.patientId?.email;
       const dateTimeStr = formatDateTime(appt.dateTime);
-      const link = appt.meetingLink;
+      const patientLink = appt.meetingLink;
+      const doctorLink = appt.doctorMeetingLink || appt.meetingLink;
       const isPast = new Date(appt.dateTime).getTime() < now.getTime();
       const emailSubject = isPast
         ? "Your Video Consultation is Ready — Sovereign HealthBook"
@@ -112,7 +113,7 @@ const sendVideoReminders = async (verbose = false) => {
               "Doctor",
               patientName,
               dateTimeStr,
-              link
+              doctorLink
             ),
           });
           successCount++;
@@ -135,7 +136,7 @@ const sendVideoReminders = async (verbose = false) => {
               "Patient",
               doctorName,
               dateTimeStr,
-              link
+              patientLink
             ),
           });
           successCount++;
@@ -155,8 +156,8 @@ const sendVideoReminders = async (verbose = false) => {
             type: "REMINDER",
             title: notifTitle,
             message: notifMessage,
-            meta: { appointmentId: appt._id, meetingLink: link },
-            link,
+            meta: { appointmentId: appt._id, meetingLink: patientLink },
+            link: patientLink,
           });
           successCount++;
           console.log(`[Reminder] Patient in-app notification created for ${patientName}`);
@@ -167,6 +168,31 @@ const sendVideoReminders = async (verbose = false) => {
         console.warn(`[Reminder] No patientId found for appointment ${appt._id}`);
       }
 
+      // 4) In-app notification to clinic admin (so doctor gets notified via dashboard)
+      if (appt.tenantId) {
+        try {
+          const Tenant = (await import("../models/tenantModel.js")).default;
+          const tenant = await Tenant.findById(appt.tenantId).select("ownerId").lean();
+          if (tenant?.ownerId) {
+            const doctorNotifMessage = isPast
+              ? `Video consultation with ${patientName} is ready. Click to join now.`
+              : `Video consultation with ${patientName} starts in 5 minutes. Get ready to join.`;
+            await NotificationService.create({
+              recipient: tenant.ownerId,
+              type: "REMINDER",
+              title: notifTitle,
+              message: doctorNotifMessage,
+              meta: { appointmentId: appt._id, meetingLink: doctorLink },
+              link: doctorLink,
+            });
+            successCount++;
+            console.log(`[Reminder] Clinic admin in-app notification created for tenant ${appt.tenantId}`);
+          }
+        } catch (err) {
+          console.error(`[Reminder] Clinic admin notification failed:`, err.message);
+        }
+      }
+
       // Only mark as sent if at least one notification succeeded
       if (successCount > 0) {
         await Appointment.updateOne(
@@ -174,7 +200,7 @@ const sendVideoReminders = async (verbose = false) => {
           { $set: { reminderSent: true } }
         );
         console.log(
-          `[Reminder] ✅ Sent ${successCount}/3 notifications for appointment ${appt._id} at ${dateTimeStr}`
+          `[Reminder] ✅ Sent ${successCount}/4 notifications for appointment ${appt._id} at ${dateTimeStr}`
         );
       } else {
         console.error(

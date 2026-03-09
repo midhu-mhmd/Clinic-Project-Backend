@@ -61,8 +61,8 @@ const planSchema = new mongoose.Schema(
     tierLevel: {
       type: Number,
       required: true,
-      unique: true, // Prevents two plans from having the same priority order
-      min: 1,
+      unique: true,
+      min: 0,
     }
   },
   {

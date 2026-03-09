@@ -58,7 +58,7 @@ doctorRouter.get("/:id", getDoctorById);
 // Create Practitioner: POST /api/doctors/
 doctorRouter.post(
   "/",
-  enforceDoctorLimit, // Logic check for Plan Quotas
+  enforceDoctorLimit,
   upload.single("image"),
   createDoctor
 );

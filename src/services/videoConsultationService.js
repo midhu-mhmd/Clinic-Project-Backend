@@ -218,7 +218,7 @@ class VideoConsultationService {
       throw new Error("Invalid meeting token purpose.");
     }
 
-    const { roomId, appointmentId } = decoded;
+    const { roomId, appointmentId, role: tokenRole } = decoded;
     if (!roomId) throw new Error("Invalid meeting token data.");
 
     // Find the consultation session
@@ -248,10 +248,13 @@ class VideoConsultationService {
       throw new Error(`This consultation has already been ${session.status.toLowerCase()}.`);
     }
 
+    // Use role from meeting token if available, otherwise infer from user identity
+    const resolvedRole = tokenRole || (isDoctor || userRole === "CLINIC_ADMIN" ? "DOCTOR" : "PATIENT");
+
     return {
       session,
       roomId,
-      role: isDoctor || userRole === "CLINIC_ADMIN" ? "DOCTOR" : "PATIENT",
+      role: resolvedRole,
     };
   }
 }

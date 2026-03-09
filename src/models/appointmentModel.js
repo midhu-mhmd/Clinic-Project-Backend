@@ -58,8 +58,12 @@ const appointmentSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Video consultation meeting link (auto-generated for type=video)
+    // Video consultation meeting links (auto-generated for type=video)
     meetingLink: {
+      type: String,
+      default: "",
+    },
+    doctorMeetingLink: {
       type: String,
       default: "",
     },

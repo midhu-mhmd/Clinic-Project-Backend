@@ -11,16 +11,22 @@ ticketRouter.use(protect);
 ticketRouter.post("/", TicketController.create);
 ticketRouter.get("/", TicketController.getMyTickets);
 
-// ─── Admin-only routes ───
-ticketRouter.get("/all", authorize("SUPER_ADMIN"), TicketController.getAllTickets);
-ticketRouter.get("/stats", authorize("SUPER_ADMIN"), TicketController.getStats);
+// ─── Patient: clinics visited (for ticket clinic selector) ───
+ticketRouter.get("/my-clinics", TicketController.getMyVisitedClinics);
 
-// ─── Single ticket (user sees own, admin sees all) ───
+// ─── Clinic Admin: tenant-routed tickets ───
+ticketRouter.get("/tenant", authorize("CLINIC_ADMIN"), TicketController.getTenantTickets);
+ticketRouter.get("/stats", authorize("SUPER_ADMIN", "CLINIC_ADMIN"), TicketController.getStats);
+
+// ─── Super Admin: all tickets ───
+ticketRouter.get("/all", authorize("SUPER_ADMIN"), TicketController.getAllTickets);
+
+// ─── Single ticket (user sees own, admin sees all, clinic admin sees tenant-routed) ───
 ticketRouter.get("/:id", TicketController.getById);
 ticketRouter.post("/:id/reply", TicketController.reply);
 
-// ─── Admin actions ───
-ticketRouter.patch("/:id/status", authorize("SUPER_ADMIN"), TicketController.updateStatus);
+// ─── Admin / Clinic Admin actions ───
+ticketRouter.patch("/:id/status", authorize("SUPER_ADMIN", "CLINIC_ADMIN"), TicketController.updateStatus);
 ticketRouter.patch("/:id/assign", authorize("SUPER_ADMIN"), TicketController.assign);
 
 export default ticketRouter;

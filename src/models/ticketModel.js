@@ -73,11 +73,69 @@ const ticketSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+
+    // ── Routing ──
+    routedTo: {
+      type: String,
+      enum: ["SUPER_ADMIN", "TENANT"],
+      default: "SUPER_ADMIN",
+      index: true,
+    },
+
     assignedTo: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null,
     },
+
+    // ── SLA — First Response ──
+    firstResponseDeadline: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    firstRespondedAt: {
+      type: Date,
+      default: null,
+    },
+    firstResponseBreached: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    // ── SLA — Resolution ──
+    slaDeadline: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    slaBreached: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    // ── Escalation ──
+    escalationLevel: {
+      type: Number,
+      default: 0, // 0 = none, 1 = warning sent, 2 = breached & escalated
+    },
+    escalatedAt: {
+      type: Date,
+      default: null,
+    },
+
+    // ── SLA Pause (while awaiting customer reply) ──
+    slaPausedAt: {
+      type: Date,
+      default: null,
+    },
+    totalPausedMs: {
+      type: Number,
+      default: 0,
+    },
+
     messages: [messageSchema],
     resolvedAt: { type: Date, default: null },
     closedAt: { type: Date, default: null },
@@ -85,12 +143,11 @@ const ticketSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-ticketSchema.pre("save", async function (next) {
+ticketSchema.pre("save", async function () {
   if (!this.ticketNumber) {
     const count = await mongoose.model("Ticket").countDocuments();
     this.ticketNumber = `TKT-${String(count + 1).padStart(5, "0")}`;
   }
-  next();
 });
 
 export default mongoose.model("Ticket", ticketSchema);

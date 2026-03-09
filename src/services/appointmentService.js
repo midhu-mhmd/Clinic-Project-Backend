@@ -160,7 +160,7 @@ class AppointmentService {
         status: "PENDING",
       });
 
-      // 8) For video appointments: auto-create VideoConsultation + sign JWT meeting link
+      // 8) For video appointments: auto-create VideoConsultation + sign JWT meeting links
       if (type === "video" && roomId) {
         await VideoConsultation.create({
           appointmentId: created._id,
@@ -170,15 +170,25 @@ class AppointmentService {
           tenantId: tId,
         });
 
-        const meetingToken = jwt.sign(
-          { roomId, appointmentId: String(created._id), purpose: "VIDEO_CONSULTATION" },
+        // Generate separate tokens for doctor and patient with embedded roles
+        const doctorMeetingToken = jwt.sign(
+          { roomId, appointmentId: String(created._id), purpose: "VIDEO_CONSULTATION", role: "DOCTOR" },
           process.env.JWT_SECRET,
           { expiresIn: "7d" }
         );
 
-        meetingLink = `${FRONTEND_URL}/consultation/${meetingToken}`;
+        const patientMeetingToken = jwt.sign(
+          { roomId, appointmentId: String(created._id), purpose: "VIDEO_CONSULTATION", role: "PATIENT" },
+          process.env.JWT_SECRET,
+          { expiresIn: "7d" }
+        );
+
+        meetingLink = `${FRONTEND_URL}/consultation/${patientMeetingToken}`;
+        const doctorMeetingLink = `${FRONTEND_URL}/consultation/${doctorMeetingToken}`;
+
         created.meetingLink = meetingLink;
-        await Appointment.findByIdAndUpdate(created._id, { meetingLink });
+        created.doctorMeetingLink = doctorMeetingLink;
+        await Appointment.findByIdAndUpdate(created._id, { meetingLink, doctorMeetingLink });
       }
 
       return created;

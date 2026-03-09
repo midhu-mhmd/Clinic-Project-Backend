@@ -13,6 +13,7 @@ import {
    getDirectory,
    getClinicById,
    getStats,
+   getPlanUsage,
    getProfile,
    updateProfile,
    uploadImage,
@@ -55,6 +56,7 @@ router.post("/reset-password", resetPasswordClinic);
    2. PROTECTED ADMIN ROUTES
 ========================================================= */
 router.get("/stats", protect, authorize("CLINIC_ADMIN"), getStats);
+router.get("/plan-usage", protect, authorize("CLINIC_ADMIN"), getPlanUsage);
 router.get("/profile", protect, authorize("CLINIC_ADMIN"), getProfile);
 router.patch("/profile", protect, authorize("CLINIC_ADMIN"), updateProfile);
 router.put("/change-password", protect, authorize("CLINIC_ADMIN"), changePassword);

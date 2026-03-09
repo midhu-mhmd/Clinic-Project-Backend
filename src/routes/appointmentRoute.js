@@ -1,7 +1,7 @@
 import express from "express";
 import AppointmentController from "../controllers/AppointmentController.js";
 import { protect, restrictTo } from "../middlewares/authMiddleware.js";
-import { triggerVideoReminders } from "../scheduler/videoReminder.js";
+import { enforcePlanFeature } from "../middlewares/enforcePlanFeature.js";
 import Appointment from "../models/appointmentModel.js";
 
 const appointmentRouter = express.Router();
@@ -15,6 +15,7 @@ appointmentRouter.get(
 // Debug route: manually trigger the 5-min video reminder check
 appointmentRouter.get("/debug/trigger-reminders", async (req, res) => {
   try {
+    const { triggerVideoReminders } = await import("../scheduler/videoReminder.js");
     console.log("[Debug] Manually triggering video reminder check...");
     const result = await triggerVideoReminders();
     return res.json({ success: true, ...result });
@@ -62,10 +63,17 @@ appointmentRouter.get(
   AppointmentController.getMyAppointments
 );
 
+// Patient count per tenant for plan enforcement
+const countUniquePatients = async (tenantId) => {
+  const patients = await Appointment.distinct("patientId", { tenantId });
+  return patients.length;
+};
+
 // 2. Resource collection routes
 appointmentRouter.post(
   "/",
   restrictTo("PATIENT", "CLINIC_ADMIN"),
+  enforcePlanFeature("maxPatients", countUniquePatients),
   AppointmentController.create
 );
 

@@ -92,7 +92,12 @@ class DoctorService {
    * ✅ CREATE RECORD
    */
   async createDoctor(tenantId, doctorData, imageUrl = "", imagePublicId = "") {
-    const tenantInfo = await this.assertTenantCanAddDoctor(tenantId);
+    if (!mongoose.Types.ObjectId.isValid(tenantId)) {
+      throw new AppError("Invalid tenant identity.", 400, "INVALID_TENANT");
+    }
+    const tenant = await Tenant.findById(tenantId).select("name").lean();
+    if (!tenant) throw new AppError("Clinic profile not found.", 404, "TENANT_NOT_FOUND");
+
     const data = normalizeDoctorData(doctorData);
 
     try {
@@ -103,7 +108,7 @@ class DoctorService {
         imagePublicId,
         isActive: true,
       });
-      return { doctor, tenantName: tenantInfo.tenantName };
+      return { doctor, tenantName: tenant.name };
     } catch (err) {
       if (err?.code === 11000) throw new AppError("Email already exists in protocol.", 409, "DUPLICATE_EMAIL");
       throw err;
