@@ -42,16 +42,7 @@ const knowledgeDocSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-    /** Number of chunks stored in Pinecone */
-    chunkCount: {
-      type: Number,
-      default: 0,
-    },
-    /** Pinecone namespace used for this doc's vectors */
-    pineconeNamespace: {
-      type: String,
-      default: "default",
-    },
+
     /** Upload / processing status */
     status: {
       type: String,

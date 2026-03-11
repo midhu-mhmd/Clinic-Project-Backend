@@ -24,7 +24,7 @@ import ticketRouter from "./src/routes/ticketRoute.js";
 import notificationRouter from "./src/routes/notificationRoute.js";
 import videoConsultationRouter from "./src/routes/videoConsultationRoute.js";
 import chatbotRouter from "./src/routes/chatbotRoute.js";
-import knowledgeRouter from "./src/routes/knowledgeRoute.js";
+
 
 const app = express();
 const httpServer = createServer(app);
@@ -94,7 +94,7 @@ app.use("/api/tickets", ticketRouter);
 app.use("/api/notifications", notificationRouter);
 app.use("/api/video-consultations", videoConsultationRouter);
 app.use("/api/chatbot", chatbotRouter);
-app.use("/api/knowledge", knowledgeRouter);
+
 
 /**
  * 3) CATCH 404
