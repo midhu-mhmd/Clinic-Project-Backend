@@ -223,7 +223,7 @@ export const verifyRegisterOTP = async (req, res) => {
 
     await deleteTempRegistration(normalized);
 
-    const loginLink = "http://localhost:5173/login";
+    const loginLink = `${process.env.CLIENT_URL || "http://localhost:5173"}/login`;
     await sendMailBestEffort({
       from: `"Sovereign Protocol" <${process.env.EMAIL_USER}>`,
       to: normalized,
@@ -332,7 +332,7 @@ export const googleLogin = async (req, res) => {
         role: "PATIENT",
       });
 
-      const loginLink = "http://localhost:5173/login";
+      const loginLink = `${process.env.CLIENT_URL || "http://localhost:5173"}/login`;
       await sendMailBestEffort({
         from: `"Sovereign Protocol" <${process.env.EMAIL_USER}>`,
         to: email,

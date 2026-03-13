@@ -139,7 +139,7 @@ class AppointmentService {
 
     // 6) Generate meeting link for video consultations
     const type = consultationType || "in-clinic";
-    const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+    const FRONTEND_URL = process.env.CLIENT_URL || process.env.FRONTEND_URL || "http://localhost:5173";
     let meetingLink = "";
     let roomId = "";
     if (type === "video") {
