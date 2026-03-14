@@ -30,16 +30,8 @@ const app = express();
 const httpServer = createServer(app);
 
 const CORS_ORIGINS = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(",").map(o => o.trim())
-  : [
-      "http://localhost:5173",
-      "http://127.0.0.1:5173",
-      "http://localhost:3000",
-      "http://127.0.0.1:3000",
-      "http://localhost:5174",
-      "http://127.0.0.1:5174",
-      "https://sovereigns.site",
-    ];
+  ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
+  : ["http://localhost:5173", "https://clinicx-mu.vercel.app"];
 
 /**
  * Socket.IO
