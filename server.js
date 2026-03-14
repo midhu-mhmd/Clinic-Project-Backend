@@ -29,13 +29,18 @@ import chatbotRouter from "./src/routes/chatbotRoute.js";
 const app = express();
 const httpServer = createServer(app);
 
-const CORS_ORIGINS = process.env.ALLOWED_ORIGINS
+const envOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim().replace(/\/$/, ""))
-  : [
-      "http://localhost:5173",
-      "http://localhost:3000",
-      "https://clinicx-mu.vercel.app",
-    ];
+  : [];
+
+const CORS_ORIGINS = [
+  ...new Set([
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "https://clinicx-mu.vercel.app",
+    ...envOrigins,
+  ]),
+];
 
 /**
  * Socket.IO
