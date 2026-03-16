@@ -34,8 +34,9 @@ const formatDateTime = (dt) => {
 const sendVideoReminders = async (verbose = false) => {
   try {
     const now = new Date();
-    // Scan for appointments starting in the next 11 minutes (increased from 5 for reliability)
-    const windowStart = new Date(now.getTime() + 0.5 * 60 * 1000); // +30 sec from now
+    // Scan for appointments starting in the next 11 minutes
+    // windowStart = now to close the 30-second gap between missed and upcoming
+    const windowStart = now; 
     const windowEnd = new Date(now.getTime() + 11.0 * 60 * 1000);  // +11 min from now
 
     // Log every minute so user knows scheduler is "ON"
@@ -196,18 +197,32 @@ const sendVideoReminders = async (verbose = false) => {
         }
       }
 
-      // Only mark as sent if at least one notification succeeded
-      if (successCount > 0) {
+      // 5) Final check — only mark as sent if BOTH doctor and patient emails succeeded (if they have emails)
+      // or if at least one email succeeded if the other is missing.
+      const doctorTargeted = !!doctorEmail;
+      const patientTargeted = !!patientEmail;
+      
+      let emailsSuccessful = false;
+      if (doctorTargeted && patientTargeted) {
+        emailsSuccessful = (successCount >= 2); // both sent
+      } else if (doctorTargeted || patientTargeted) {
+        emailsSuccessful = (successCount >= 1); // at least one sent
+      } else {
+        // No emails found at all, but we might have sent in-app notif
+        emailsSuccessful = (successCount > 0);
+      }
+
+      if (emailsSuccessful) {
         await Appointment.updateOne(
           { _id: appt._id },
           { $set: { reminderSent: true } }
         );
         console.log(
-          `[Reminder] ✅ Sent ${successCount}/4 notifications for appointment ${appt._id} at ${dateTimeStr}`
+          `[Reminder] ✅ Successfully sent notifications for appointment ${appt._id} at ${dateTimeStr}`
         );
       } else {
         console.error(
-          `[Reminder] ❌ All notifications failed for appointment ${appt._id} — will retry next cycle`
+          `[Reminder] ❌ Emails failed for appointment ${appt._id} — will retry next cycle`
         );
       }
     }
