@@ -229,7 +229,7 @@ class AppointmentController {
                 dateTimeStr,
                 appointmentData.consultationType,
                 appointment.consultationFee,
-                appointment.doctorMeetingLink || ""
+                "" // No meeting link in immediate confirmation
               ),
           }).catch((e) => console.error("Doctor email notification failed:", e.message));
         }
@@ -249,7 +249,7 @@ class AppointmentController {
                 dateTimeStr,
                 appointmentData.consultationType,
                 appointment.consultationFee,
-                appointment.meetingLink || ""
+                "" // No meeting link in immediate confirmation
               ),
           }).catch((e) => console.error("Patient email notification failed:", e.message));
         }
