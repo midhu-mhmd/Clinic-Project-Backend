@@ -215,9 +215,8 @@ class AppointmentController {
           auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
         });
 
-        // 1) Email notification to doctor (include meeting link if video)
+        // 1) Email notification to doctor (no meeting link — sent 5 min before)
         if (doctor?.email) {
-          const doctorLink = appointment.doctorMeetingLink || appointment.meetingLink;
           transporter.sendMail({
             from: `"Sovereign Protocol" <${process.env.EMAIL_USER}>`,
             to: doctor.email,
@@ -230,12 +229,12 @@ class AppointmentController {
                 dateTimeStr,
                 appointmentData.consultationType,
                 appointment.consultationFee,
-                appointmentData.consultationType === "video" ? doctorLink : ""
+                "" // Meeting link sent separately 5 min before
               ),
           }).catch((e) => console.error("Doctor email notification failed:", e.message));
         }
 
-        // 2) Email notification to patient (include meeting link if video)
+        // 2) Email notification to patient (no meeting link — sent 5 min before)
         const patientEmail = patient?.email || snapshot.email;
         if (patientEmail) {
           transporter.sendMail({
@@ -250,7 +249,7 @@ class AppointmentController {
                 dateTimeStr,
                 appointmentData.consultationType,
                 appointment.consultationFee,
-                appointmentData.consultationType === "video" ? appointment.meetingLink : ""
+                "" // Meeting link sent separately 5 min before
               ),
           }).catch((e) => console.error("Patient email notification failed:", e.message));
         }
