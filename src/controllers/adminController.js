@@ -161,44 +161,6 @@ export const clearTenantCache = async (req, res) => {
   return res.status(200).json({ success: true, message: "Tenant configuration and metrics cache cleared." });
 };
 
-/* =========================================================
-   USER MANAGEMENT (SUPER ADMIN)
-========================================================= */
-
-export const getUserDetails = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const user = await User.findById(id).populate("tenantId", "name").select("-password").lean();
-    if (!user) return res.status(404).json({ success: false, message: "User not found" });
-
-    return res.status(200).json({ success: true, data: user });
-  } catch (err) {
-    return res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-export const updateUserStatus = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { isActive } = req.body;
-    await User.findByIdAndUpdate(id, { isActive });
-    return res.status(200).json({ success: true, message: "User status updated" });
-  } catch (err) {
-    return res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-export const deleteUser = async (req, res) => {
-  try {
-    const { id } = req.params;
-    // For now, soft-delete or just suspend
-    await User.findByIdAndUpdate(id, { isActive: false });
-    return res.status(200).json({ success: true, message: "User suspended/deleted." });
-  } catch (err) {
-    return res.status(500).json({ success: false, message: err.message });
-  }
-};
-
 import bcrypt from "bcryptjs";
 import Appointment from "../models/appointmentModel.js";
 
