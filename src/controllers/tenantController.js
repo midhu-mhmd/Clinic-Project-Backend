@@ -146,6 +146,7 @@ export const getDirectory = catchAsync(async (req, res) => {
         : "MISSING",
     cancelAtPeriodEnd: clinic.subscription?.cancelAtPeriodEnd || false,
     isPaused: clinic.subscription?.isPaused || false,
+    paymentMethod: clinic.subscription?.razorpayPaymentId ? "RAZORPAY" : "MANUAL",
   }));
 
   return res.status(200).json({
