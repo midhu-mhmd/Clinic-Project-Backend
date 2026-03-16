@@ -143,7 +143,7 @@ class AppointmentService {
 
     // 6) Generate meeting link for video consultations
     const type = consultationType || "in-clinic";
-    const FRONTEND_URL = process.env.CLIENT_URL || process.env.FRONTEND_URL || "http://localhost:3000";
+    const FRONTEND_URL = process.env.CLIENT_URL || process.env.FRONTEND_URL || "https://clinicx-mu.vercel.app";
     let meetingLink = "";
     let roomId = "";
     if (type === "video") {
