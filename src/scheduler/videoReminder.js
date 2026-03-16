@@ -102,8 +102,8 @@ const sendVideoReminders = async (verbose = false) => {
       const notifMessage = isPast
         ? `Your video consultation with Dr. ${doctorName} is ready. Click to join the call now.`
         : `Your video consultation with Dr. ${doctorName} starts in 5 minutes. Click to join the call.`;
-
-      let successCount = 0;
+      let emailSuccessCount = 0;
+      let inAppSuccessCount = 0;
 
       // 1) Email meeting link to doctor
       if (doctorEmail) {
@@ -119,7 +119,7 @@ const sendVideoReminders = async (verbose = false) => {
               doctorLink
             ),
           });
-          successCount++;
+          emailSuccessCount++;
           console.log(`[Reminder] Doctor email sent to ${doctorEmail}`);
         } catch (err) {
           console.error(`[Reminder] Doctor email failed (${doctorEmail}):`, err.message);
@@ -142,7 +142,7 @@ const sendVideoReminders = async (verbose = false) => {
               patientLink
             ),
           });
-          successCount++;
+          emailSuccessCount++;
           console.log(`[Reminder] Patient email sent to ${patientEmail}`);
         } catch (err) {
           console.error(`[Reminder] Patient email failed (${patientEmail}):`, err.message);
@@ -162,7 +162,7 @@ const sendVideoReminders = async (verbose = false) => {
             meta: { appointmentId: appt._id, meetingLink: patientLink },
             link: patientLink,
           });
-          successCount++;
+          inAppSuccessCount++;
           console.log(`[Reminder] Patient in-app notification created for ${patientName}`);
         } catch (err) {
           console.error(`[Reminder] Patient notification failed:`, err.message);
@@ -188,7 +188,7 @@ const sendVideoReminders = async (verbose = false) => {
               meta: { appointmentId: appt._id, meetingLink: doctorLink },
               link: doctorLink,
             });
-            successCount++;
+            inAppSuccessCount++;
             console.log(`[Reminder] Clinic admin in-app notification created for tenant ${appt.tenantId}`);
           }
         } catch (err) {
@@ -196,33 +196,29 @@ const sendVideoReminders = async (verbose = false) => {
         }
       }
 
-      // 5) Final check — only mark as sent if BOTH doctor and patient emails succeeded (if they have emails)
-      // or if at least one email succeeded if the other is missing.
-      const doctorTargeted = !!doctorEmail;
-      const patientTargeted = !!patientEmail;
+      // ─── FINAL DETERMINATION ───
+      // We mark as sent only if EMAILS succeeded (if there are email addresses)
+      const doctorHasEmail = !!doctorEmail;
+      const patientHasEmail = !!patientEmail;
       
-      let emailsSuccessful = false;
-      if (doctorTargeted && patientTargeted) {
-        emailsSuccessful = (successCount >= 2); // both sent
-      } else if (doctorTargeted || patientTargeted) {
-        emailsSuccessful = (successCount >= 1); // at least one sent
+      let finalSuccess = false;
+      if (doctorHasEmail && patientHasEmail) {
+        finalSuccess = (emailSuccessCount >= 2);
+      } else if (doctorHasEmail || patientHasEmail) {
+        finalSuccess = (emailSuccessCount >= 1);
       } else {
-        // No emails found at all, but we might have sent in-app notif
-        emailsSuccessful = (successCount > 0);
+        // Fallback: if no emails exist at all, we rely on in-app notifications
+        finalSuccess = (inAppSuccessCount > 0);
       }
 
-      if (emailsSuccessful) {
+      if (finalSuccess) {
         await Appointment.updateOne(
           { _id: appt._id },
           { $set: { reminderSent: true } }
         );
-        console.log(
-          `[Reminder] ✅ Successfully sent notifications for appointment ${appt._id} at ${dateTimeStr}`
-        );
+        console.log(`[Reminder] ✅ Successfully dispatched for appointment ${appt._id} (${emailSuccessCount} emails, ${inAppSuccessCount} push)`);
       } else {
-        console.error(
-          `[Reminder] ❌ Emails failed for appointment ${appt._id} — will retry next cycle`
-        );
+        console.error(`[Reminder] ❌ Delivery failed/incomplete for ${appt._id} — will retry next minute`);
       }
     }
 
