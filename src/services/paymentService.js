@@ -228,6 +228,7 @@ export const confirmRazorpayPaymentService = async ({
           "subscription.price.amount": (payment.amountPaise || 0) / 100,
           "subscription.price.currency": payment.currency || "INR",
           "subscription.activatedAt": payment.updatedAt || new Date(),
+          "subscription.paymentMethodStatus": "ON_FILE",
         },
       }
     );
@@ -278,6 +279,7 @@ export const confirmRazorpayPaymentService = async ({
         "subscription.price.amount": (payment.amountPaise || 0) / 100,
         "subscription.price.currency": payment.currency || "INR",
         "subscription.activatedAt": new Date(),
+        "subscription.paymentMethodStatus": "ON_FILE",
       },
     }
   );

@@ -282,6 +282,7 @@ export const activateTenantSubscription = async ({
     "subscription.status": "ACTIVE",
     "subscription.razorpayOrderId": normalizeStr(razorpayOrderId),
     "subscription.razorpayPaymentId": normalizeStr(razorpayPaymentId),
+    "subscription.paymentMethodStatus": "ON_FILE",
   };
 
   if (plan) {
