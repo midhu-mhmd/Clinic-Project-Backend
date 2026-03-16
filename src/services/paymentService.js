@@ -163,6 +163,8 @@ const options = {
       $set: {
         "subscription.plan": code,
         "subscription.billingCycle": cycle,
+        "subscription.price.amount": amountPaise / 100,
+        "subscription.price.currency": options.currency,
         "subscription.razorpayOrderId": order.id,
         // keep status pending until verified
         "subscription.status": "PENDING_VERIFICATION",
@@ -222,6 +224,9 @@ export const confirmRazorpayPaymentService = async ({
           "subscription.plan": payment.planCode,
           "subscription.status": "ACTIVE",
           "subscription.razorpayPaymentId": payment.razorpayPaymentId,
+          "subscription.billingCycle": payment.billingCycle || "monthly",
+          "subscription.price.amount": (payment.amountPaise || 0) / 100,
+          "subscription.price.currency": payment.currency || "INR",
           "subscription.activatedAt": payment.updatedAt || new Date(),
         },
       }
@@ -270,6 +275,8 @@ export const confirmRazorpayPaymentService = async ({
         "subscription.status": "ACTIVE",
         "subscription.razorpayPaymentId": razorpayPaymentId,
         "subscription.billingCycle": payment.billingCycle || "monthly",
+        "subscription.price.amount": (payment.amountPaise || 0) / 100,
+        "subscription.price.currency": payment.currency || "INR",
         "subscription.activatedAt": new Date(),
       },
     }
@@ -344,6 +351,8 @@ export const submitManualPaymentService = async ({
       $set: {
         "subscription.plan": code,
         "subscription.billingCycle": cycle,
+        "subscription.price.amount": amountPaise / 100,
+        "subscription.price.currency": "INR",
         "subscription.status": "PENDING_VERIFICATION",
       },
     }
