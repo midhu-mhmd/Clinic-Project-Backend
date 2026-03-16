@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import User from "../models/userModel.js";
+import Tenant from "../models/tenantModel.js";
 
 /* =========================================================
    Helpers
@@ -57,6 +58,16 @@ const verifyAndAttachUser = async (req) => {
     if (decoded.tokenVersion < user.tokenVersion) {
       const e = new Error("Session invalidated. Please login again.");
       e.statusCode = 401;
+      throw e;
+    }
+  }
+
+  // Block login if tenant is suspended
+  if (user.tenantId) {
+    const tenant = await Tenant.findById(user.tenantId).select("isActive name").lean();
+    if (!tenant || tenant.isActive === false) {
+      const e = new Error("Clinic access suspended. Please contact support.");
+      e.statusCode = 403;
       throw e;
     }
   }
