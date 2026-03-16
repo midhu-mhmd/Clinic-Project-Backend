@@ -251,7 +251,13 @@ export const appointmentBookedDoctorTemplate = (doctorName, patientName, dateTim
         <div class="detail-value">\u20B9${fee}</div>
       </div>
 
-      ${consultationType === 'video' && meetingLink ? `<a href="${meetingLink}" class="cta-button">Join Video Call &rarr;</a>` : ''}
+      ${consultationType === 'video' 
+        ? (meetingLink 
+            ? `<a href="${meetingLink}" class="cta-button">Join Video Call &rarr;</a>`
+            : `<div style="background-color: #f9fafb; padding: 20px; border: 1px solid #e5e7eb; color: #6b7280; font-size: 14px; margin-top: 20px;">
+                 <strong>Note:</strong> The secure meeting link will be emailed to you <strong>5 minutes before</strong> the consultation begins.
+               </div>`)
+        : ''}
 
       <p style="font-size: 12px; color: #9ca3af; margin-top: 40px;">Log in to your dashboard to manage this appointment.</p>
     </div>
@@ -316,8 +322,14 @@ export const appointmentBookedPatientTemplate = (patientName, doctorName, dateTi
         <div class="detail-value">\u20B9${fee}</div>
       </div>
 
-      ${consultationType === 'video' && meetingLink ? `<a href="${meetingLink}" class="cta-button">Join Video Call &rarr;</a>
-      <p style="font-size: 12px; color: #9ca3af;">Save this link — you will use it to join the video consultation at your scheduled time.</p>` : ''}
+      ${consultationType === 'video' 
+        ? (meetingLink 
+            ? `<a href="${meetingLink}" class="cta-button">Join Video Call &rarr;</a>
+               <p style="font-size: 12px; color: #9ca3af;">Save this link — you will use it to join the video consultation at your scheduled time.</p>`
+            : `<div style="background-color: #fefce8; padding: 20px; border: 1px solid #fef08a; color: #854d0e; font-size: 14px; margin-top: 20px;">
+                 <strong>Meeting Link Protocol:</strong> For security, your video consultation link will be emailed to you <strong>5 minutes before</strong> the scheduled start time.
+               </div>`)
+        : ''}
 
       <p style="font-size: 12px; color: #9ca3af; margin-top: 40px;">If you did not book this appointment, please contact support.</p>
     </div>

@@ -237,7 +237,7 @@ class AppointmentController {
             from: `"Sovereign Protocol" <${process.env.EMAIL_USER}>`,
             to: doctor.email,
             subject: appointmentData.consultationType === "video"
-              ? "New Video Consultation Booked | Sovereign"
+              ? "New Video Consultation Booked | Sovereign (Meeting link will be sent later)"
               : "New Appointment Booked | Sovereign",
               html: appointmentBookedDoctorTemplate(
                 doctor.name,
@@ -257,7 +257,7 @@ class AppointmentController {
             from: `"Sovereign Protocol" <${process.env.EMAIL_USER}>`,
             to: patientEmail,
             subject: appointmentData.consultationType === "video"
-              ? "Video Consultation Confirmed | Sovereign"
+              ? "Video Consultation Confirmed | Sovereign (Meeting link comes later)"
               : "Appointment Confirmed | Sovereign",
               html: appointmentBookedPatientTemplate(
                 snapshot.name,
