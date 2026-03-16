@@ -213,7 +213,15 @@ class AppointmentController {
         const pad = (n) => String(n).padStart(2, "0");
         const dt = appointment.dateTime ? new Date(appointment.dateTime) : null;
         const dateTimeStr = dt
-          ? `${pad(dt.getDate())} ${dt.toLocaleString("default", { month: "short" })} ${dt.getFullYear()}, ${pad(dt.getHours() % 12 || 12)}:${pad(dt.getMinutes())} ${dt.getHours() >= 12 ? "PM" : "AM"}`
+          ? dt.toLocaleString("en-IN", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: true,
+            timeZone: "Asia/Kolkata",
+          })
           : "N/A";
 
         const transporter = nodemailer.createTransport({
