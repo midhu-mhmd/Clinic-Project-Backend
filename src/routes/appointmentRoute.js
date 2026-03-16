@@ -12,7 +12,7 @@ appointmentRouter.get(
   AppointmentController.getBookedSlots
 );
 
-// Debug route: manually trigger the 5-min video reminder check
+// Debug route: manually trigger the 10-min video reminder check
 appointmentRouter.get("/debug/trigger-reminders", async (req, res) => {
   try {
     const { triggerVideoReminders } = await import("../scheduler/videoReminder.js");
