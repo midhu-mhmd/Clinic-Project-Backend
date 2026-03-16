@@ -68,7 +68,7 @@ const appointmentSchema = new mongoose.Schema(
       default: "",
     },
 
-    // Whether the 10-min-before reminder email was sent
+    // Whether the 5-min-before reminder email was sent
     reminderSent: {
       type: Boolean,
       default: false,

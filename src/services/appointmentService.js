@@ -30,8 +30,12 @@ class AppointmentService {
 
     if (bad) return null;
 
-    // Local time Date object (Asia/Kolkata on your machine)
-    const dt = new Date(y, m - 1, d, hh, mm, 0, 0);
+    // Force IST (+05:30) timezone representation so it accurately aligns 
+    // to Indian time regardless of server environment TZ settings (e.g. AWS EC2 in UTC)
+    const pad = (n) => String(n).padStart(2, "0");
+    const isoStr = `${y}-${pad(m)}-${pad(d)}T${pad(hh)}:${pad(mm)}:00+05:30`;
+    const dt = new Date(isoStr);
+    
     if (Number.isNaN(dt.getTime())) return null;
 
     return dt;

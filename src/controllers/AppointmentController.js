@@ -38,11 +38,19 @@ const resolveDateSlot = (raw) => {
   const d = new Date(dt);
   if (Number.isNaN(d.getTime())) return { date: "", slot: "" };
 
-  const pad = (n) => String(n).padStart(2, "0");
-  const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  const slot = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-
-  return { date, slot };
+  // Extract IST-specific date and time components to avoid local server timezone interference
+  try {
+    const [datePart, timePart] = d.toLocaleString("en-GB", { timeZone: "Asia/Kolkata" }).split(", ");
+    const [day, month, year] = datePart.split("/");
+    const [hh, mm] = timePart.split(":");
+    return { date: `${year}-${month}-${day}`, slot: `${hh}:${mm}` };
+  } catch (err) {
+    // Fallback if Intl is unavailable/fails
+    const pad = (n) => String(n).padStart(2, "0");
+    const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const slot = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    return { date, slot };
+  }
 };
 
 const buildPatientInfoSnapshot = (raw = {}) => {
