@@ -7,10 +7,11 @@ import {
     impersonateTenant,
     clearTenantCache,
     getAllTenants,
-    getAdminProfile,
-    updateAdminProfile,
     changeAdminPassword,
-    getAdminNotifications
+    getAdminNotifications,
+    getUserDetails,
+    updateUserStatus,
+    deleteUser
 } from "../controllers/adminController.js";
 import { protect, authorize } from "../middlewares/authMiddleware.js";
 
@@ -34,6 +35,11 @@ adminRouter.patch("/tenants/:id/status", updateTenantStatus);
 adminRouter.delete("/tenants/:id", deleteTenant);
 adminRouter.post("/tenants/:id/impersonate", impersonateTenant);
 adminRouter.post("/tenants/:id/clear-cache", clearTenantCache);
+
+// USER MANAGEMENT
+adminRouter.get("/users/:id", getUserDetails);
+adminRouter.patch("/users/:id/status", updateUserStatus);
+adminRouter.delete("/users/:id", deleteUser);
 
 // ADMIN SETTINGS
 adminRouter.get("/settings/profile", getAdminProfile);
