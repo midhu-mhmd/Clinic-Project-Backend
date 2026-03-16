@@ -34,10 +34,9 @@ const formatDateTime = (dt) => {
 const sendVideoReminders = async (verbose = false) => {
   try {
     const now = new Date();
-    // Scan for appointments starting in the next 11 minutes
-    // windowStart = now to close the 30-second gap between missed and upcoming
+    // Scan for appointments starting in the next 6 minutes (triggers ~5 min before)
     const windowStart = now; 
-    const windowEnd = new Date(now.getTime() + 11.0 * 60 * 1000);  // +11 min from now
+    const windowEnd = new Date(now.getTime() + 6.0 * 60 * 1000);  
 
     // Log every minute so user knows scheduler is "ON"
     const shouldLog = true; 
@@ -96,13 +95,13 @@ const sendVideoReminders = async (verbose = false) => {
       
       const emailSubject = isPast
         ? "Your Video Consultation is Ready — Sovereign HealthBook"
-        : "Video Consultation in 10 Minutes — Sovereign HealthBook";
+        : "Video Consultation in 5 Minutes — Sovereign HealthBook";
       const notifTitle = isPast
         ? "Video Consultation — Join Now"
-        : "Video Consultation in 10 Minutes";
+        : "Video Consultation in 5 Minutes";
       const notifMessage = isPast
         ? `Your video consultation with Dr. ${doctorName} is ready. Click to join the call now.`
-        : `Your video consultation with Dr. ${doctorName} starts in 10 minutes. Click to join the call.`;
+        : `Your video consultation with Dr. ${doctorName} starts in 5 minutes. Click to join the call.`;
 
       let successCount = 0;
 

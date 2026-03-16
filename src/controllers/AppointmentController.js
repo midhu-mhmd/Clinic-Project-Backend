@@ -263,7 +263,7 @@ class AppointmentController {
             recipient: userId,
             type: "APPOINTMENT",
             title: "Appointment Confirmed",
-            message: `Your ${appointmentData.consultationType === "video" ? "video consultation" : "in-clinic appointment"} with Dr. ${doctor?.name || "your doctor"} is booked for ${dateTimeStr}.${appointmentData.consultationType === "video" ? " Meeting link will be sent 10 minutes before the session." : ""}`,
+            message: `Your ${appointmentData.consultationType === "video" ? "video consultation" : "in-clinic appointment"} with Dr. ${doctor?.name || "your doctor"} is booked for ${dateTimeStr}.${appointmentData.consultationType === "video" ? " Meeting link will be sent 5 minutes before the session." : ""}`,
             meta: notifMeta,
           }).catch((e) => console.error("Patient notification failed:", e.message));
         }
