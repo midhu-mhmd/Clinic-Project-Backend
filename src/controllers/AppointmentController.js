@@ -223,14 +223,14 @@ class AppointmentController {
             subject: appointmentData.consultationType === "video"
               ? "New Video Consultation Booked | Sovereign"
               : "New Appointment Booked | Sovereign",
-            html: appointmentBookedDoctorTemplate(
-              doctor.name,
-              snapshot.name,
-              dateTimeStr,
-              appointmentData.consultationType,
-              appointment.consultationFee,
-              ""
-            ),
+              html: appointmentBookedDoctorTemplate(
+                doctor.name,
+                snapshot.name,
+                dateTimeStr,
+                appointmentData.consultationType,
+                appointment.consultationFee,
+                appointment.doctorMeetingLink || ""
+              ),
           }).catch((e) => console.error("Doctor email notification failed:", e.message));
         }
 
@@ -243,14 +243,14 @@ class AppointmentController {
             subject: appointmentData.consultationType === "video"
               ? "Video Consultation Confirmed | Sovereign"
               : "Appointment Confirmed | Sovereign",
-            html: appointmentBookedPatientTemplate(
-              snapshot.name,
-              doctor?.name || "your doctor",
-              dateTimeStr,
-              appointmentData.consultationType,
-              appointment.consultationFee,
-              ""
-            ),
+              html: appointmentBookedPatientTemplate(
+                snapshot.name,
+                doctor?.name || "your doctor",
+                dateTimeStr,
+                appointmentData.consultationType,
+                appointment.consultationFee,
+                appointment.meetingLink || ""
+              ),
           }).catch((e) => console.error("Patient email notification failed:", e.message));
         }
 
