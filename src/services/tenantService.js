@@ -8,6 +8,8 @@ import Tenant from "../models/tenantModel.js";
 import User from "../models/userModel.js";
 import Doctor from "../models/doctorModel.js";
 import Appointment from "../models/appointmentModel.js";
+import TempRegistration from "../models/tempRegistrationModel.js";
+import OTP from "../models/otpModel.js";
 
 /* =========================================================
    Subscription Configuration (Server-Side Source of Truth)
@@ -71,64 +73,90 @@ export const signPaymentToken = ({ tenantId, email, role = "CLINIC_ADMIN" }) => 
    Redis & Email (Singleton Logic)
    ========================================================= */
 let redisClient;
-let redisAvailable = false;
-
-// In-memory OTP fallback when Redis is unavailable
-const memoryOtpStore = new Map();
+let redisInitPromise = null;
 
 export const initRedis = async () => {
   if (redisClient?.isOpen) return redisClient;
-  try {
-    redisClient = createClient({
-      url: process.env.REDIS_URL || "redis://127.0.0.1:6379",
-      socket: { connectTimeout: 5000, reconnectStrategy: false },
-    });
-    redisClient.on("error", () => {});
-    await redisClient.connect();
-    redisAvailable = true;
-    return redisClient;
-  } catch {
-    redisAvailable = false;
-    redisClient = null;
-    console.warn("Redis unavailable — using in-memory OTP store.");
-    return null;
-  }
+  if (redisInitPromise) return redisInitPromise;
+
+  redisInitPromise = (async () => {
+    try {
+      redisClient = createClient({
+        url: process.env.REDIS_URL || "redis://127.0.0.1:6379",
+        socket: {
+          connectTimeout: 5000,
+          reconnectStrategy: (retries) => (retries > 3 ? new Error("Limit reached") : 500),
+        },
+      });
+      redisClient.on("error", (err) => console.log("❌ Redis error:", err.message));
+      await redisClient.connect();
+      return redisClient;
+    } catch (err) {
+      console.error("❌ Redis init failed:", err.message);
+      redisClient = null;
+      return null;
+    } finally {
+      redisInitPromise = null;
+    }
+  })();
+
+  return redisInitPromise;
 };
 
 const setOtp = async (email, otp, ttlSeconds = 600) => {
-  const key = otpKey(email);
+  const e = normalizeEmail(email);
+  const key = `otp:${e}`;
+
   try {
     const client = await initRedis();
     if (client) {
-      await client.setEx(key, ttlSeconds, otp);
+      await client.setEx(key, ttlSeconds, String(otp));
       return;
     }
-  } catch { /* fall through */ }
-  memoryOtpStore.set(key, { otp, expires: Date.now() + ttlSeconds * 1000 });
+  } catch (err) {
+    console.error("Redis setOtp fallback to Mongo:", err.message);
+  }
+
+  // MongoDB Fallback
+  await OTP.findOneAndUpdate(
+    { email: e },
+    { otp: String(otp), createdAt: new Date() },
+    { upsert: true }
+  );
 };
 
 const getOtp = async (email) => {
-  const key = otpKey(email);
+  const e = normalizeEmail(email);
+  const key = `otp:${e}`;
+
   try {
     const client = await initRedis();
-    if (client) return await client.get(key);
-  } catch { /* fall through */ }
-  const entry = memoryOtpStore.get(key);
-  if (!entry) return null;
-  if (Date.now() > entry.expires) { memoryOtpStore.delete(key); return null; }
-  return entry.otp;
+    if (client) {
+      const val = await client.get(key);
+      if (val) return val;
+    }
+  } catch (err) {
+    console.error("Redis getOtp fallback to Mongo:", err.message);
+  }
+
+  // MongoDB Fallback
+  const doc = await OTP.findOne({ email: e });
+  return doc ? doc.otp : null;
 };
 
 const delOtp = async (email) => {
-  const key = otpKey(email);
+  const e = normalizeEmail(email);
+  const key = `otp:${e}`;
+
   try {
     const client = await initRedis();
-    if (client) { await client.del(key); return; }
-  } catch { /* fall through */ }
-  memoryOtpStore.delete(key);
-};
+    if (client) await client.del(key);
+  } catch (err) {
+    console.error("Redis delOtp error:", err.message);
+  }
 
-const otpKey = (email) => `otp:${normalizeEmail(email)}`;
+  await OTP.deleteOne({ email: e });
+};
 
 let transporter;
 const getTransporter = () => {

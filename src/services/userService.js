@@ -1,4 +1,6 @@
 import User from "../models/userModel.js";
+import TempRegistration from "../models/tempRegistrationModel.js";
+import OTP from "../models/otpModel.js";
 import { createClient } from "redis";
 
 let redisClient = null;
@@ -30,23 +32,38 @@ export const initRedis = async () => {
     try {
       redisClient = createClient({
         url: process.env.REDIS_URL || "redis://127.0.0.1:6379",
+        socket: {
+          connectTimeout: 5000, // 5s timeout for connection
+          reconnectStrategy: (retries) => {
+            if (retries > 3) return new Error("Redis retry limit reached");
+            return Math.min(retries * 50, 500);
+          }
+        }
       });
 
-      redisClient.on("error", (err) => console.log("❌ Redis Error:", err));
+      redisClient.on("error", (err) => console.log("❌ Redis Error:", err.message));
       redisClient.on("connect", () => console.log("🟡 Redis Connecting..."));
       redisClient.on("ready", () => console.log("✅ Redis Ready"));
       redisClient.on("reconnecting", () => console.log("♻️ Redis Reconnecting..."));
       redisClient.on("end", () => console.log("🔴 Redis Connection Closed"));
 
-      await redisClient.connect();
+      // Wrap connect in a timeout just in case the socket option isn't enough
+      const connectPromise = redisClient.connect();
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error("Redis connection timeout")), 6000)
+      );
+
+      await Promise.race([connectPromise, timeoutPromise]);
       return redisClient;
     } catch (err) {
-      // if connect fails, clear broken client
-      console.error("❌ Redis connect failed:", err);
+      console.error("❌ Redis init failed:", err.message);
+      // Clean up if it failed
+      try {
+        if (redisClient) await redisClient.disconnect().catch(() => {});
+      } catch {}
       redisClient = null;
       throw err;
     } finally {
-      // allow future retry
       redisInitPromise = null;
     }
   })();
@@ -96,58 +113,117 @@ export const updatePassword = async (email, hashedPassword) => {
  * - TTL 10 minutes (600s)
  */
 export const saveTempRegistration = async (email, data) => {
-  if (!redisClient?.isOpen) await initRedis();
-
   const e = normalizeEmail(email);
   const key = `reg_otp:${e}`;
+  const safeData = data && typeof data === "object" ? data : { value: data };
 
-  // ensure object is stored
-  const safeData =
-    data && typeof data === "object"
-      ? data
-      : { value: data };
+  try {
+    if (!redisClient?.isOpen) await initRedis().catch(() => {});
+    if (redisClient?.isOpen) {
+      await redisClient.setEx(key, 600, JSON.stringify(safeData));
+      return;
+    }
+  } catch (err) {
+    console.error("Redis saveTempRegistration fallback to Mongo:", err.message);
+  }
 
-  await redisClient.setEx(key, 600, JSON.stringify(safeData));
+  // MongoDB Fallback
+  await TempRegistration.findOneAndUpdate(
+    { email: e },
+    { data: safeData, createdAt: new Date() },
+    { upsert: true, new: true }
+  );
 };
 
 export const getTempRegistration = async (email) => {
-  if (!redisClient?.isOpen) await initRedis();
-
   const e = normalizeEmail(email);
-  const raw = await redisClient.get(`reg_otp:${e}`);
 
-  return raw ? safeJsonParse(raw) : null;
+  try {
+    if (!redisClient?.isOpen) await initRedis().catch(() => {});
+    if (redisClient?.isOpen) {
+      const raw = await redisClient.get(`reg_otp:${e}`);
+      if (raw) return safeJsonParse(raw);
+    }
+  } catch (err) {
+    console.error("Redis getTempRegistration fallback to Mongo:", err.message);
+  }
+
+  // MongoDB Fallback
+  const doc = await TempRegistration.findOne({ email: e });
+  return doc ? doc.data : null;
 };
 
 export const deleteTempRegistration = async (email) => {
-  if (!redisClient?.isOpen) await initRedis();
-
   const e = normalizeEmail(email);
-  await redisClient.del(`reg_otp:${e}`);
+
+  try {
+    if (!redisClient?.isOpen) await initRedis().catch(() => {});
+    if (redisClient?.isOpen) {
+      await redisClient.del(`reg_otp:${e}`);
+    }
+  } catch (err) {
+    console.error("Redis deleteTempRegistration error:", err.message);
+  }
+
+  // Always try Mongo too for safety
+  await TempRegistration.deleteOne({ email: e });
 };
 
 /**
  * Save OTP (TTL 5 minutes / 300s)
  */
 export const saveOTPToCache = async (email, otp) => {
-  if (!redisClient?.isOpen) await initRedis();
-
   const e = normalizeEmail(email);
   const value = typeof otp === "string" ? otp : String(otp);
 
-  await redisClient.setEx(`otp:${e}`, 300, value);
+  try {
+    if (!redisClient?.isOpen) await initRedis().catch(() => {});
+    if (redisClient?.isOpen) {
+      await redisClient.setEx(`otp:${e}`, 300, value);
+      return;
+    }
+  } catch (err) {
+    console.error("Redis saveOTPToCache fallback to Mongo:", err.message);
+  }
+
+  // MongoDB Fallback
+  await OTP.findOneAndUpdate(
+    { email: e },
+    { otp: value, createdAt: new Date() },
+    { upsert: true, new: true }
+  );
 };
 
 export const getOTPFromCache = async (email) => {
-  if (!redisClient?.isOpen) await initRedis();
-
   const e = normalizeEmail(email);
-  return redisClient.get(`otp:${e}`);
+
+  try {
+    if (!redisClient?.isOpen) await initRedis().catch(() => {});
+    if (redisClient?.isOpen) {
+      const val = await redisClient.get(`otp:${e}`);
+      if (val) return val;
+    }
+  } catch (err) {
+    console.error("Redis getOTPFromCache fallback to Mongo:", err.message);
+  }
+
+  // MongoDB Fallback
+  const doc = await OTP.findOne({ email: e });
+  return doc ? doc.otp : null;
 };
 
 export const deleteOTPFromCache = async (email) => {
-  if (!redisClient?.isOpen) await initRedis();
-
   const e = normalizeEmail(email);
-  await redisClient.del(`otp:${e}`);
+
+  try {
+    if (!redisClient?.isOpen) await initRedis().catch(() => {});
+    if (redisClient?.isOpen) {
+      await redisClient.del(`otp:${e}`);
+    }
+  } catch (err) {
+    console.error("Redis deleteOTPFromCache error:", err.message);
+  }
+
+  // Always try Mongo too
+  await OTP.deleteOne({ email: e });
 };
