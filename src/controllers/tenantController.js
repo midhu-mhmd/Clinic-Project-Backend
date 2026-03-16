@@ -140,7 +140,10 @@ export const getDirectory = catchAsync(async (req, res) => {
     subscriptionStatus: clinic.subscription?.status,
     billingCycle: clinic.subscription?.billingCycle || "MONTHLY",
     nextRenewalDate: clinic.subscription?.nextRenewalDate,
-    paymentMethodStatus: clinic.subscription?.paymentMethodStatus || "MISSING",
+    paymentMethodStatus:
+      clinic.subscription?.status === "ACTIVE" || clinic.subscription?.paymentMethodStatus === "ON_FILE"
+        ? "ON_FILE"
+        : "MISSING",
     cancelAtPeriodEnd: clinic.subscription?.cancelAtPeriodEnd || false,
     isPaused: clinic.subscription?.isPaused || false,
   }));
