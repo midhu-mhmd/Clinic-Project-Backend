@@ -114,7 +114,7 @@ const EMERGENCY_PATTERNS = [
 /* =========================================================
    System Prompt for Gemini
 ========================================================= */
-const SYSTEM_PROMPT = `You are an AI-powered virtual nurse assistant for Sovereign HealthBook, a multi-tenant healthcare platform. Your name is "HealthBot".
+const SYSTEM_PROMPT = `You are an AI-powered virtual nurse assistant for Sovereign Healthcare, a multi-tenant healthcare platform. Your name is "HealthBot".
 
 ## Your Capabilities:
 1. **Symptom Analysis**: Understand patient symptoms, ask clarifying questions, and assess severity (mild/moderate/severe).
@@ -373,7 +373,7 @@ class ChatbotService {
       messages: [
         {
           role: "assistant",
-          content: "Hello! 👋 I'm **HealthBot**, your AI-powered health assistant at Sovereign HealthBook.\n\nI can help you:\n• 🩺 **Analyze your symptoms** and assess severity\n• 🏥 **Match you to the right department** (ENT, Ortho, Neuro, Cardiology…)\n• 👨‍⚕️ **Find available doctors** and recommend specialists\n• 📅 **Book appointments** automatically\n• 🚨 **Detect emergencies** and guide you to immediate help\n• 🎫 **Create support tickets** for billing or technical issues\n\nTell me — what's bothering you today?",
+          content: "Hello! 👋 I'm **HealthBot**, your AI-powered health assistant at Sovereign Healthcare.\n\nI can help you:\n• 🩺 **Analyze your symptoms** and assess severity\n• 🏥 **Match you to the right department** (ENT, Ortho, Neuro, Cardiology…)\n• 👨‍⚕️ **Find available doctors** and recommend specialists\n• 📅 **Book appointments** automatically\n• 🚨 **Detect emergencies** and guide you to immediate help\n• 🎫 **Create support tickets** for billing or technical issues\n\nTell me — what's bothering you today?",
         },
       ],
     });

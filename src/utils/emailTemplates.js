@@ -36,7 +36,7 @@ export const verifyEmailTemplate = (otp) => `
       <p style="font-size: 12px; color: #9ca3af;">This code is ephemeral and will expire in 10:00 minutes.</p>
     </div>
     <div class="footer">
-      &copy; SOVEREIGN HEALTHBOOK / PRECISION CARE
+      &copy; SOVEREIGN HEALTHCARE / PRECISION CARE
     </div>
   </div>
 </body>
@@ -124,7 +124,7 @@ export const doctorInvitationTemplate = (doctorName, specialization, loginLink) 
       <a href="${loginLink}" class="cta-button">Access Faculty Portal &rarr;</a>
     </div>
     <div class="footer">
-      SOVEREIGN HEALTHBOOK / PRECISION CARE FACULTY DIVISION — 2026
+      SOVEREIGN HEALTHCARE / PRECISION CARE FACULTY DIVISION — 2026
     </div>
   </div>
 </body>
@@ -186,7 +186,7 @@ export const videoReminderTemplate = (recipientName, role, otherPartyName, dateT
       <p style="font-size: 12px; color: #9ca3af; margin-top: 40px;">If you did not book this appointment, please ignore this email.</p>
     </div>
     <div class="footer">
-      SOVEREIGN HEALTHBOOK / PRECISION CARE — 2026
+      SOVEREIGN HEALTHCARE / PRECISION CARE — 2026
     </div>
   </div>
 </body>
@@ -262,7 +262,7 @@ export const appointmentBookedDoctorTemplate = (doctorName, patientName, dateTim
       <p style="font-size: 12px; color: #9ca3af; margin-top: 40px;">Log in to your dashboard to manage this appointment.</p>
     </div>
     <div class="footer">
-      SOVEREIGN HEALTHBOOK / PRECISION CARE — 2026
+      SOVEREIGN HEALTHCARE / PRECISION CARE — 2026
     </div>
   </div>
 </body>
@@ -334,7 +334,7 @@ export const appointmentBookedPatientTemplate = (patientName, doctorName, dateTi
       <p style="font-size: 12px; color: #9ca3af; margin-top: 40px;">If you did not book this appointment, please contact support.</p>
     </div>
     <div class="footer">
-      SOVEREIGN HEALTHBOOK / PRECISION CARE — 2026
+      SOVEREIGN HEALTHCARE / PRECISION CARE — 2026
     </div>
   </div>
 </body>

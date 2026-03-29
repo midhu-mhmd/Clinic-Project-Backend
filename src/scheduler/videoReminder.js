@@ -95,8 +95,8 @@ const sendVideoReminders = async (verbose = false) => {
       const isPast = new Date(appt.dateTime).getTime() < now.getTime();
       
       const emailSubject = isPast
-        ? "Your Video Consultation is Ready — Sovereign HealthBook"
-        : "Video Consultation in 5 Minutes — Sovereign HealthBook";
+        ? "Your Video Consultation is Ready — Sovereign Healthcare"
+        : "Video Consultation in 5 Minutes — Sovereign Healthcare";
       const notifTitle = isPast
         ? "Video Consultation — Join Now"
         : "Video Consultation in 5 Minutes";

@@ -25,7 +25,7 @@ export const sendEmail = async (options) => {
   try {
     const senderEmail = process.env.SMTP_USER || process.env.EMAIL_USER;
     const mailOptions = {
-      from: `"Sovereign HealthBook" <${senderEmail}>`,
+      from: `"Sovereign Healthcare" <${senderEmail}>`,
       to: options.to,
       subject: options.subject,
       html: options.html,
