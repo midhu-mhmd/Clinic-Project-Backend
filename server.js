@@ -36,7 +36,7 @@ const envOrigins = process.env.ALLOWED_ORIGINS
 const CORS_ORIGINS = [
   ...new Set([ 
     "http://127.0.0.1:3000",
-    "https://clinicx-mu.vercel.app",
+    "https://sovereign-care.vercel.app/",
     ...envOrigins,
   ]),
 ];
