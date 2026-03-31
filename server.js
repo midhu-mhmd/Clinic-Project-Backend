@@ -34,21 +34,43 @@ const envOrigins = process.env.ALLOWED_ORIGINS
   : [];
 
 const CORS_ORIGINS = [
-  ...new Set([ 
-    // "http://127.0.0.1:3000",
+  ...new Set([
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
     "https://sovereign-care.vercel.app",
     ...envOrigins,
   ]),
 ];
+
+const corsOptions = {
+  origin(origin, callback) {
+    // Allow non-browser tools or same-origin requests without an Origin header.
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+
+    const normalizedOrigin = origin.replace(/\/$/, "");
+    if (CORS_ORIGINS.includes(normalizedOrigin)) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  credentials: true,
+};
 
 /**
  * Socket.IO
  */
 const io = new SocketIOServer(httpServer, {
   cors: {
-    origin: CORS_ORIGINS,
+    ...corsOptions,
     methods: ["GET", "POST"],
-    credentials: true,
   },
 });
 registerSignalingHandlers(io);
@@ -57,12 +79,9 @@ registerSignalingHandlers(io);
  * 1) GLOBAL MIDDLEWARE
  */
 app.use(
-  cors({
-    origin: CORS_ORIGINS,
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-    credentials: true,
-  })
+  cors(corsOptions)
 );
+app.options(/.*/, cors(corsOptions));
 
 app.use(
   helmet({
