@@ -5,6 +5,12 @@ import Doctor from "../models/doctorModel.js";
 import VideoConsultation from "../models/videoConsultationModel.js";
 import mongoose from "mongoose";
 
+const DEFAULT_CLIENT_URL = (
+  process.env.CLIENT_URL ||
+  process.env.FRONTEND_URL ||
+  "https://sovereigns.site"
+).replace(/\/+$/, "");
+
 class AppointmentService {
   // ---------- helpers ----------
   #isValidObjectId(id) {
@@ -143,7 +149,7 @@ class AppointmentService {
 
     // 6) Generate meeting link for video consultations
     const type = consultationType || "in-clinic";
-    const FRONTEND_URL = process.env.CLIENT_URL || process.env.FRONTEND_URL || "https://clinicx-mu.vercel.app";
+    const FRONTEND_URL = DEFAULT_CLIENT_URL;
     let meetingLink = "";
     let roomId = "";
     if (type === "video") {

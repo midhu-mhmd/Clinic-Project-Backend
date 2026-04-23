@@ -23,6 +23,11 @@ import {
 } from "../services/userService.js";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+const DEFAULT_CLIENT_URL = (
+  process.env.CLIENT_URL ||
+  process.env.FRONTEND_URL ||
+  "https://sovereigns.site"
+).replace(/\/+$/, "");
 
 // ---------------- helpers ----------------
 const normalizeEmail = (email = "") => String(email).trim().toLowerCase();
@@ -223,7 +228,7 @@ export const verifyRegisterOTP = async (req, res) => {
 
     await deleteTempRegistration(normalized);
 
-    const loginLink = `${process.env.CLIENT_URL || "https://clinicx-mu.vercel.app"}/login`;
+    const loginLink = `${DEFAULT_CLIENT_URL}/login`;
     await sendMailBestEffort({
       from: `"Sovereign Protocol" <${process.env.EMAIL_USER}>`,
       to: normalized,
@@ -332,7 +337,7 @@ export const googleLogin = async (req, res) => {
         role: "PATIENT",
       });
 
-      const loginLink = `${process.env.CLIENT_URL || "https://clinicx-mu.vercel.app"}/login`;
+      const loginLink = `${DEFAULT_CLIENT_URL}/login`;
       await sendMailBestEffort({
         from: `"Sovereign Protocol" <${process.env.EMAIL_USER}>`,
         to: email,

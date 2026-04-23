@@ -29,9 +29,16 @@ import chatbotRouter from "./src/routes/chatbotRoute.js";
 const app = express();
 const httpServer = createServer(app);
 
-const envOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim().replace(/\/$/, ""))
-  : [];
+const normalizeOrigin = (origin = "") => String(origin).trim().replace(/\/$/, "");
+
+const envOrigins = [
+  process.env.CLIENT_URL,
+  process.env.FRONTEND_URL,
+  process.env.APP_URL,
+  ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : []),
+]
+  .map(normalizeOrigin)
+  .filter(Boolean);
 
 const CORS_ORIGINS = [
   ...new Set([
@@ -40,6 +47,8 @@ const CORS_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "https://sovereign-care.vercel.app",
+    "https://sovereigns.site",
+    "https://www.sovereigns.site",
     ...envOrigins,
   ]),
 ];
@@ -52,7 +61,7 @@ const corsOptions = {
       return;
     }
 
-    const normalizedOrigin = origin.replace(/\/$/, "");
+    const normalizedOrigin = normalizeOrigin(origin);
     if (CORS_ORIGINS.includes(normalizedOrigin)) {
       callback(null, true);
       return;
