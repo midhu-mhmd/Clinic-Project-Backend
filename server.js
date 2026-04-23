@@ -109,6 +109,18 @@ app.use(express.json());
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 /**
+ * Health Check Endpoint
+ */
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "OK",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    message: "Server is healthy",
+  });
+});
+
+/**
  * 2) ROUTES
  */
 app.use("/api/users", router);
